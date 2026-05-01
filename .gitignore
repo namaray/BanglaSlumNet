@@ -1,3 +1,4 @@
 slum_env/
 __pycache__/
 *.pyc
+paired_dataset/
