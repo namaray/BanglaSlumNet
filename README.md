@@ -1,7 +1,7 @@
 # BanglaSlumNet: Implementation Documentation & Roadmap
 
 **Project:** Physics-Guided Atmospheric Disentanglement With Cross-Modal Socioeconomic Fusion for Decadal Informal Settlement Mapping of Bangladesh  
-**Status:** Architecture Skeleton Validated (Mission 1 Complete)
+**Status:** Stage 1 SAS-Net GAN Training Loop Validated (Mission 2 Complete)
 
 ---
 
@@ -13,39 +13,44 @@ BanglaSlumNet is a 3-stage deep learning pipeline designed to map informal settl
 
 ---
 
-## ✅ Milestones Achieved (Mission 1)
-*Goal: Prove mathematical soundness and data flow of the core architecture.*
+## ✅ Milestones Achieved 
 
-- [x] **Cloud Setup:** Google Cloud Project registered (`banglaslumnet-research`) and Earth Engine API authenticated.
-- [x] **Data Ingestion:** Script written to query GEE, filter clouds, composite, and download Sentinel-2 `.tif` tensors.
-- [x] **PyTorch DataLoader:** Built `BanglaSlumDataset` to load `.tif` files, normalize physical radiance, and crop to exact `[1, 4, 512, 512]` tensors.
-- [x] **Stage 1 (SAS-Net):** Built `StructureEncoder` (EfficientNet-B2 truncated at stride 8) and `AppearanceEncoder` with `AdaIN` style-injection.
-- [x] **Stage 2 (Fusion):** Built `CrossAttentionFusion` module to project 5 socioeconomic rasters into Keys/Values and merge with Visual Structure (Query) via Multi-Head Attention.
-- [x] **Decoder:** Built a 3-block bilinear U-Net `SegmentationDecoder` ending in a Sigmoid activation.
-- [x] **Validation:** End-to-end forward pass completed successfully without tensor dimension mismatches. Output shape validated as `[Batch, 1, 512, 512]`.
+### Mission 1: Architecture Skeleton
+- [x] **Cloud Setup:** Google Cloud Project registered and Earth Engine API authenticated.
+- [x] **Data Ingestion:** Sentinel-2 GEE export script written and tested.
+- [x] **PyTorch DataLoader:** Built `BanglaSlumDataset` to load `.tif` files and format them as `[1, 4, 512, 512]` tensors.
+- [x] **Model Architecture:** Built Stage 1 (SAS-Net), Stage 2 (Cross-Attention Fusion), and Decoder (U-Net).
+- [x] **Forward Pass:** End-to-end forward pass completed successfully without tensor dimension mismatches.
 
-### Current Codebase Files
-1. `download_s2.py` - Connects to GEE and downloads Sentinel-2 tiles.
+### Mission 2: Isolate & Train Stage 1 (The De-Hazer)
+- [x] **Paired Data Prep:** Wrote GEE script to download aligned Hazy/Clear image pairs (e.g., Mirpur, Korail, Old Dhaka).
+- [x] **Discriminator:** Built the `PatchGANDiscriminator` (70x70 receptive field).
+- [x] **Loss Functions:** Implemented $L_{recon}$ (MSE), $L_{adv}$ (Adversarial), and $L_{scene}$ (Structure consistency L1 loss).
+- [x] **Training Loop 1:** Wrote and successfully executed the GAN training loop. Gradients flow correctly, and discriminator/generator weights update without crashing.
+
+---
+
+## 📂 Current Codebase Files
+1. `download_s2.py` - Connects to GEE and downloads single Sentinel-2 tiles.
 2. `view_tile.py` - Uses `rasterio` and `matplotlib` to visualize raw satellite tensors.
 3. `slum_dataloader.py` - PyTorch dataset class for handling raw GeoTIFFs.
 4. `sasnet.py` - Holds the Structure Encoder, Appearance Encoder, and AdaIN modules.
 5. `stage2_fusion.py` - Holds the Socioeconomic Encoders and Multi-Head Cross-Attention module.
 6. `decoder.py` - Holds the U-Net upsampler and the master end-to-end test script.
+7. `download_pairs.py` - Downloads perfectly aligned Hazy/Clear image pairs for Stage 1 training.
+8. `stage1_gan.py` - Contains the PatchGAN Discriminator and custom `SASNetLoss` math.
+9. `train_stage1.py` - The master training loop for Stage 1.
 
 ---
 
 ## 🚀 Roadmap: Things Left To Do
 
-### Mission 2: Isolate & Train Stage 1 (The De-Hazer)
-*Goal: Teach the model to see through Bangladesh's winter brick-kiln smog.*
-- [ ] **Data Prep:** Write a GEE script to download ~100-500 *paired* images of Dhaka (Hazy Winter image vs. Clear Spring image of the exact same location).
-- [ ] **Discriminator:** Build the `PatchGAN` Discriminator network.
-- [ ] **Loss Functions:** Implement $L_{recon}$ (MSE), $L_{adv}$ (Adversarial), and $L_{scene}$ (Structure consistency) from the blueprint.
-- [ ] **Training Loop 1:** Train Stage 1 in isolation until it can successfully take a hazy image and output a clean one. *Freeze weights once complete.*
+### 🛠️ Urgent Infrastructure Fix
+- [ ] **CUDA Setup:** Uninstall CPU-only PyTorch and install PyTorch with CUDA 12.x support so the training loop utilizes the NVIDIA RTX 5060 Ti.
 
 ### Mission 3: Isolate & Train Stage 2 (Optical Ambiguity)
 *Goal: Teach the model to distinguish slums from formal housing using socioeconomic clues.*
-- [ ] **Socioeconomic Data Prep:** Download and align Google Open Buildings (Density), VIIRS (Nighttime Lights), and Poverty Maps for Dhaka.
+- [ ] **Socioeconomic Data Prep:** Download and align Google Open Buildings (Density), VIIRS (Nighttime Lights), and Poverty Maps for our Dhaka coordinates.
 - [ ] **Label Prep:** Ingest the GRAM dataset labels for Dhaka as the ground-truth targets (`y`).
 - [ ] **Loss Functions:** Implement $L_{IoU}$ (Soft IoU) and $L_{BCE}$ (Binary Cross-Entropy) with class weighting (3.0 for slums, 1.0 for background).
 - [ ] **Training Loop 2:** Train the Cross-Attention and Decoder modules on the clear Sentinel-2 images + Socioeconomic stack.
