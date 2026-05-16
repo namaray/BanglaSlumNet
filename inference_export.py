@@ -1,109 +1,184 @@
 import os
+import glob
 import torch
 import rasterio
 from rasterio.features import shapes
-from rasterio.transform import from_origin
 import numpy as np
 import cv2
 import geopandas as gpd
 from shapely.geometry import shape
 
-# Import our models
 from sasnet import StructureEncoder
 from stage2_fusion import CrossAttentionFusion
 from decoder import SegmentationDecoder
 
-def run_inference_and_export():
-    device = torch.device('cpu') # Forcing CPU for this test
-    print("🚀 Initializing Inference Pipeline...")
 
-    # 1. Load the Models (In reality, you would load your trained .pth weights here!)
-    # e.g., struct_enc.load_state_dict(torch.load('best_sasnet.pth'))
-    struct_enc = StructureEncoder().to(device)
-    struct_enc.eval() # Set to evaluation mode!
-    
-    fusion = CrossAttentionFusion(num_se_channels=3).to(device)
+# ==========================================
+# CONFIG
+# ==========================================
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+DATA_DIR   = os.path.join(os.getcwd(), "dhaka_dataset")
+OUTPUT_DIR = os.path.join(os.getcwd(), "final_outputs")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+FUSION_CKPT  = os.path.join(os.getcwd(), "checkpoints_stage2", "best_fusion.pth")
+DECODER_CKPT = os.path.join(os.getcwd(), "checkpoints_stage2", "best_decoder.pth")
+
+THRESHOLD    = 0.5
+MORPH_KERNEL = 5
+
+
+# ==========================================
+# HELPERS
+# ==========================================
+def load_tif(path):
+    with rasterio.open(path) as src:
+        arr  = src.read().astype(np.float32)[:, :512, :512]
+        meta = src.meta.copy()
+    return arr, meta
+
+
+def normalize_satellite(arr):
+    return np.clip(arr / 3000.0, 0.0, 1.0).astype(np.float32)
+
+
+def normalize_aux(arr):
+    vmax = float(arr.max())
+    return (arr / vmax if vmax > 0 else arr).astype(np.float32)
+
+
+def load_models():
+    struct_enc = StructureEncoder().to(DEVICE)
+    fusion     = CrossAttentionFusion(num_se_channels=3).to(DEVICE)
+    decoder    = SegmentationDecoder().to(DEVICE)
+
+    for ckpt, model, name in [
+        (None,        struct_enc, "StructureEncoder"),
+        (FUSION_CKPT, fusion,     "Fusion"),
+        (DECODER_CKPT, decoder,   "Decoder"),
+    ]:
+        if ckpt and os.path.exists(ckpt):
+            model.load_state_dict(torch.load(ckpt, map_location=DEVICE), strict=False)
+            print(f"✅ Loaded {name}: {ckpt}")
+        else:
+            print(f"⚠️  No checkpoint for {name} — using random weights.")
+
+    struct_enc.eval()
     fusion.eval()
-    
-    decoder = SegmentationDecoder().to(device)
     decoder.eval()
+    return struct_enc, fusion, decoder
 
-    # 2. Load the input data (Let's use Korail from our dataset)
-    print("Loading satellite and socioeconomic data for Korail...")
-    def load_tif(path):
-        with rasterio.open(path) as src:
-            img = src.read().astype(np.float32)
-            meta = src.meta # WE NEED THIS META TO SAVE THE MAP EXACTLY WHERE IT BELONGS ON EARTH!
-        return torch.from_numpy(img)[:, :512, :512], meta
 
-    # We use the Clear image + SE data
-    s2_img, s2_meta = load_tif('paired_dataset/korail_clear.tif')
-    s2_img = (s2_img / 3000.0).clamp(0, 1).unsqueeze(0) # Add batch dimension
-
-    ntl, _ = load_tif('paired_dataset/korail_ntl.tif')
-    pop, _ = load_tif('paired_dataset/korail_pop.tif')
-    gob, _ = load_tif('paired_dataset/korail_gob.tif')
-    
-    se_stack =[
-        (ntl / (ntl.max() + 1e-5)).unsqueeze(0),
-        (pop / (pop.max() + 1e-5)).unsqueeze(0),
-        (gob / (gob.max() + 1e-5)).unsqueeze(0)
-    ]
-
-    # 3. RUN THE FORWARD PASS (No gradients needed)
-    print("Running AI Prediction...")
-    with torch.no_grad():
-        s_m = struct_enc(s2_img)
-        f_m = fusion(s_m, se_stack)
-        # Note: In inference, we use the final Sigmoid layer!
-        prob_mask = decoder(f_m) 
-
-    # 4. POST-PROCESSING (Blueprint Section 3.6)
-    print("Applying Morphological Closing & Thresholding...")
-    prob_numpy = prob_mask.squeeze().cpu().numpy()
-    
-    # Threshold at 0.5
-    binary_mask = (prob_numpy > 0.5).astype(np.uint8)
-    
-    # Morphological Closing (5x5 kernel) to remove isolated noise pixels
-    kernel = np.ones((5, 5), np.uint8)
-    smoothed_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
-
-    # 5. EXPORT TO GEOTIFF
-    output_dir = os.path.join(os.getcwd(), 'final_outputs')
-    os.makedirs(output_dir, exist_ok=True)
-    
-    tif_out_path = os.path.join(output_dir, 'korail_slum_prediction.tif')
-    print(f"Exporting GeoTIFF to: {tif_out_path}")
-    
-    out_meta = s2_meta.copy()
+def export_geotiff(array, ref_meta, out_path, dtype="float32"):
+    out_meta = ref_meta.copy()
     out_meta.update({
         "driver": "GTiff",
-        "height": 512,
-        "width": 512,
-        "count": 1,
-        "dtype": 'uint8'
+        "height": array.shape[0],
+        "width":  array.shape[1],
+        "count":  1,
+        "dtype":  dtype,
     })
-    
-    with rasterio.open(tif_out_path, 'w', **out_meta) as dest:
-        dest.write(smoothed_mask, 1)
+    with rasterio.open(out_path, "w", **out_meta) as dst:
+        dst.write(array.astype(dtype), 1)
 
-    # 6. EXPORT TO SHAPEFILE (.shp)
-    shp_out_path = os.path.join(output_dir, 'korail_slum_polygons.shp')
-    print(f"Exporting Vector Shapefile to: {shp_out_path}")
-    
-    # Convert pixels to vector polygons
-    mask_generator = shapes(smoothed_mask, mask=(smoothed_mask == 1), transform=s2_meta['transform'])
-    polygons =[{"geometry": shape(geom), "properties": {"class": "slum"}} for geom, val in mask_generator]
-    
-    if len(polygons) > 0:
-        gdf = gpd.GeoDataFrame.from_features(polygons, crs=s2_meta['crs'])
-        gdf.to_file(shp_out_path)
-        print(f"✅ Generated {len(polygons)} slum polygons!")
-    else:
-        print("✅ No slum pixels detected in this tile.")
 
-    print("🎉 INFERENCE COMPLETE!")
+def export_polygons(binary_mask, ref_meta, out_path):
+    gen = shapes(
+        binary_mask.astype(np.uint8),
+        mask=(binary_mask == 1),
+        transform=ref_meta["transform"]
+    )
+    polys = [
+        {"geometry": shape(geom), "properties": {"class": "slum"}}
+        for geom, val in gen if val == 1
+    ]
+    if not polys:
+        return 0
+    gdf = gpd.GeoDataFrame.from_features(polys, crs=ref_meta["crs"])
+    gdf.to_file(out_path)
+    return len(polys)
+
+
+# ==========================================
+# SINGLE TILE
+# ==========================================
+def run_tile(tile_id, struct_enc, fusion, decoder):
+    clear_path = os.path.join(DATA_DIR, f"{tile_id}_clear.tif")
+    ntl_path   = os.path.join(DATA_DIR, f"{tile_id}_ntl.tif")
+    pop_path   = os.path.join(DATA_DIR, f"{tile_id}_pop.tif")
+    gob_path   = os.path.join(DATA_DIR, f"{tile_id}_gob.tif")
+
+    required = [clear_path, ntl_path, pop_path, gob_path]
+    missing  = [p for p in required if not os.path.exists(p)]
+    if missing:
+        print(f"  ⚠️  Skipping {tile_id} — missing: {[os.path.basename(p) for p in missing]}")
+        return
+
+    clear_arr, meta = load_tif(clear_path)
+    ntl_arr, _      = load_tif(ntl_path)
+    pop_arr, _      = load_tif(pop_path)
+    gob_arr, _      = load_tif(gob_path)
+
+    clear_t = torch.from_numpy(normalize_satellite(clear_arr)).unsqueeze(0).to(DEVICE)
+    se_stack = [
+        torch.from_numpy(normalize_aux(ntl_arr)).unsqueeze(0).to(DEVICE),
+        torch.from_numpy(normalize_aux(pop_arr)).unsqueeze(0).to(DEVICE),
+        torch.from_numpy(normalize_aux(gob_arr)).unsqueeze(0).to(DEVICE),
+    ]
+
+    with torch.no_grad():
+        s_m    = struct_enc(clear_t)
+        f_m    = fusion(s_m, se_stack)
+        logits = decoder(f_m)
+        probs  = torch.sigmoid(logits)
+
+    prob_np   = probs.squeeze().cpu().numpy()
+    binary    = (prob_np >= THRESHOLD).astype(np.uint8)
+    kernel    = np.ones((MORPH_KERNEL, MORPH_KERNEL), np.uint8)
+    smoothed  = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+
+    # Export probability raster (float32)  — primary artifact
+    prob_out = os.path.join(OUTPUT_DIR, f"{tile_id}_prob.tif")
+    export_geotiff(prob_np, meta, prob_out, dtype="float32")
+
+    # Export binary prediction raster (uint8)
+    bin_out = os.path.join(OUTPUT_DIR, f"{tile_id}_pred.tif")
+    export_geotiff(smoothed, meta, bin_out, dtype="uint8")
+
+    # Export vector shapefile (optional — skip if no detections)
+    shp_out   = os.path.join(OUTPUT_DIR, f"{tile_id}_polygons.shp")
+    n_polys   = export_polygons(smoothed, meta, shp_out)
+
+    print(f"  ✅ {tile_id} → prob.tif, pred.tif | {n_polys} polygons")
+
+
+# ==========================================
+# BATCH RUNNER
+# ==========================================
+def run_batch():
+    print(f"🚀 Batch Inference  |  device={DEVICE}")
+    print(f"   DATA_DIR   : {DATA_DIR}")
+    print(f"   OUTPUT_DIR : {OUTPUT_DIR}\n")
+
+    struct_enc, fusion, decoder = load_models()
+
+    # Discover every tile that has a _clear.tif anchor file
+    clear_files = sorted(glob.glob(os.path.join(DATA_DIR, "*_clear.tif")))
+    tile_ids    = [os.path.basename(f).replace("_clear.tif", "") for f in clear_files]
+
+    if not tile_ids:
+        print("❌ No tiles found. Run download_dhaka_dataset.py first.")
+        return
+
+    print(f"Found {len(tile_ids)} tiles. Running...\n")
+
+    for i, tile_id in enumerate(tile_ids, 1):
+        print(f"[{i}/{len(tile_ids)}] {tile_id}")
+        run_tile(tile_id, struct_enc, fusion, decoder)
+
+    print(f"\n🎉 Done. Outputs saved to: {OUTPUT_DIR}")
+
 
 if __name__ == "__main__":
-    run_inference_and_export()
+    run_batch()

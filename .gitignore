@@ -2,3 +2,5 @@ slum_env/
 __pycache__/
 *.pyc
 paired_dataset/
+dhaka_dataset/
+dhaka_dataset.zip

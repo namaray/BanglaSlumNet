@@ -1,104 +1,142 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-# ==========================================
-# 1. SOCIOECONOMIC CHANNEL ENCODER
-# ==========================================
+
 class SEChannelEncoder(nn.Module):
-    """
-    Takes ONE socioeconomic raster (e.g., Nighttime Lights) of size 512x512
-    and shrinks it down to 64x64 with 64 feature channels.
-    """
-    def __init__(self):
+    def __init__(self, out_channels=64):
         super(SEChannelEncoder, self).__init__()
-        # 3 layers of Conv->BN->ReLU with Stride 2 to shrink 512 -> 256 -> 128 -> 64
+
         self.net = nn.Sequential(
             nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(16),
-            nn.ReLU(),
-            
+            nn.ReLU(inplace=True),
+
             nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(32),
-            nn.ReLU(),
-            
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU()
+            nn.ReLU(inplace=True),
+
+            nn.Conv2d(32, out_channels, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
         )
 
     def forward(self, x):
         return self.net(x)
 
-# ==========================================
-# 2. CROSS-ATTENTION FUSION
-# ==========================================
+
 class CrossAttentionFusion(nn.Module):
-    def __init__(self, num_se_channels=5, d_model=256, num_heads=8):
+    def __init__(
+        self,
+        num_se_channels=3,
+        d_model=256,
+        num_heads=8,
+        se_hidden=64,
+        dropout=0.1,
+        attn_size=16
+    ):
         super(CrossAttentionFusion, self).__init__()
-        
-        # We need 5 independent encoders (NTL, Pop, GOB/OSM, Poverty, Kilns)
-        self.se_encoders = nn.ModuleList([SEChannelEncoder() for _ in range(num_se_channels)])
-        
-        # After concatenating the 5 encoders (5 * 64 = 320), we project it to 256 to match s_m
-        self.se_project = nn.Conv2d(num_se_channels * 64, d_model, kernel_size=1)
-        
-        # The Multi-Head Attention Mechanism
-        self.multihead_attn = nn.MultiheadAttention(embed_dim=d_model, num_heads=num_heads, batch_first=True)
+
+        self.num_se_channels = num_se_channels
+        self.d_model = d_model
+        self.se_hidden = se_hidden
+        self.attn_size = attn_size
+
+        self.se_encoders = nn.ModuleList(
+            [SEChannelEncoder(out_channels=se_hidden) for _ in range(num_se_channels)]
+        )
+
+        self.se_project = nn.Sequential(
+            nn.Conv2d(num_se_channels * se_hidden, d_model, kernel_size=1),
+            nn.BatchNorm2d(d_model),
+            nn.ReLU(inplace=True)
+        )
+
+        self.query_norm = nn.LayerNorm(d_model)
+        self.key_value_norm = nn.LayerNorm(d_model)
+
+        self.multihead_attn = nn.MultiheadAttention(
+            embed_dim=d_model,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+
+        self.out_norm = nn.LayerNorm(d_model)
+        self.out_dropout = nn.Dropout(dropout)
 
     def forward(self, S, se_inputs):
-        """
-        S: The clean structure code from SAS-Net [Batch, 256, 64, 64]
-        se_inputs: List of 5 tensors, each [Batch, 1, 512, 512]
-        """
-        b, c, h, w = S.shape
-        
-        # 1. Encode all 5 socioeconomic channels independently
-        encoded_se =[]
-        for i in range(len(self.se_encoders)):
-            encoded_se.append(self.se_encoders[i](se_inputs[i]))
-            
-        # 2. Concatenate them all together and project to d_model (256)
-        E = torch.cat(encoded_se, dim=1) # Shape: [Batch, 320, 64, 64]
-        E = self.se_project(E)           # Shape:[Batch, 256, 64, 64]
-        
-        # 3. Reshape for PyTorch's Attention layer
-        # Attention expects sequences, so we flatten the 64x64 grid into 4096 "pixels"
-        # Shape becomes [Batch, 4096, 256]
-        S_flat = S.view(b, c, -1).permute(0, 2, 1) 
-        E_flat = E.view(b, c, -1).permute(0, 2, 1)
-        
-        # 4. CROSS ATTENTION! 
-        # Query = Structure (What am I looking at?)
-        # Key/Value = Socioeconomic (Is this a slum?)
-        attn_output, _ = self.multihead_attn(query=S_flat, key=E_flat, value=E_flat)
-        
-        # 5. Reshape back to image format[Batch, 256, 64, 64]
-        attn_output = attn_output.permute(0, 2, 1).view(b, c, h, w)
-        
-        # 6. RESIDUAL ADDITION (As strictly specified in your blueprint equation)
-        # F = CrossAttention(S, E) + S
-        F = attn_output + S
-        
-        return F
+        if not isinstance(se_inputs, (list, tuple)):
+            raise TypeError("se_inputs must be a list or tuple of tensors.")
 
-# --- Let's test the Fusion! ---
+        if len(se_inputs) != self.num_se_channels:
+            raise ValueError(
+                f"Expected {self.num_se_channels} socioeconomic channels, "
+                f"but got {len(se_inputs)}."
+            )
+
+        b, c, h, w = S.shape
+        if c != self.d_model:
+            raise ValueError(f"Expected S to have {self.d_model} channels, got {c}.")
+
+        encoded_se = []
+        for i in range(self.num_se_channels):
+            x = se_inputs[i]
+            if x.dim() != 4 or x.shape[1] != 1:
+                raise ValueError(
+                    f"Each SE input must have shape [B, 1, H, W]. Got {x.shape} at index {i}."
+                )
+            encoded_se.append(self.se_encoders[i](x))
+
+        E = torch.cat(encoded_se, dim=1)
+        E = self.se_project(E)
+
+        S_small = F.adaptive_avg_pool2d(S, (self.attn_size, self.attn_size))
+        E_small = F.adaptive_avg_pool2d(E, (self.attn_size, self.attn_size))
+
+        S_flat = S_small.flatten(2).transpose(1, 2)
+        E_flat = E_small.flatten(2).transpose(1, 2)
+
+        S_q = self.query_norm(S_flat)
+        E_kv = self.key_value_norm(E_flat)
+
+        attn_output, _ = self.multihead_attn(
+            query=S_q,
+            key=E_kv,
+            value=E_kv,
+            need_weights=False
+        )
+
+        attn_output = self.out_dropout(attn_output)
+        fused_small = self.out_norm(attn_output + S_flat)
+        fused_small = fused_small.transpose(1, 2).reshape(
+            b, c, self.attn_size, self.attn_size
+        )
+
+        fused_up = F.interpolate(
+            fused_small,
+            size=(h, w),
+            mode="bilinear",
+            align_corners=False
+        )
+
+        fused = S + fused_up
+        return fused
+
+
 if __name__ == "__main__":
     print("Initializing Cross-Attention Fusion Module...")
-    fusion_module = CrossAttentionFusion(num_se_channels=5)
-    
-    # Fake structure code (coming from your SAS-Net)
+
+    fusion_module = CrossAttentionFusion(num_se_channels=3, attn_size=16)
+
     dummy_S = torch.rand(1, 256, 64, 64)
-    
-    # Fake Socioeconomic Rasters (5 separate maps of 512x512)
     dummy_NTL = torch.rand(1, 1, 512, 512)
     dummy_Pop = torch.rand(1, 1, 512, 512)
     dummy_GOB = torch.rand(1, 1, 512, 512)
-    dummy_Poverty = torch.rand(1, 1, 512, 512)
-    dummy_Kiln = torch.rand(1, 1, 512, 512)
-    
-    se_inputs =[dummy_NTL, dummy_Pop, dummy_GOB, dummy_Poverty, dummy_Kiln]
-    
+
+    se_inputs = [dummy_NTL, dummy_Pop, dummy_GOB]
+
     print("\nFusing Visual Structure with Socioeconomic Context...")
-    F = fusion_module(dummy_S, se_inputs)
-    
-    print(f"✅ Fused Feature Map (F) Shape: {F.shape}")
+    F_out = fusion_module(dummy_S, se_inputs)
+
+    print(f"✅ Fused Feature Map shape: {F_out.shape}")
