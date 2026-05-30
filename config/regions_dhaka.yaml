@@ -1,0 +1,66 @@
+# Dhaka five-region benchmark — bounding boxes in WGS84 (lon_min, lat_min, lon_max, lat_max).
+# ALL coordinates are TODO_VERIFY — verify visually in GEE before first export.
+# Use the "Region preview on map" cell in BanglaSlumNet_Colab.ipynb for visual confirmation.
+
+regions:
+  korail:
+    type: informal
+    role: train_eval
+    description: "Largest Dhaka slum, beside Gulshan lake"
+    bbox:
+      lon_min: 90.4110   # TODO_VERIFY
+      lat_min: 23.7830   # TODO_VERIFY
+      lon_max: 90.4220   # TODO_VERIFY
+      lat_max: 23.7930   # TODO_VERIFY
+    notes: "Adjacent to Gulshan Lake; dense informal settlement"
+
+  bhashantek:
+    type: informal
+    role: train_eval
+    description: "Government-resettlement + informal mix"
+    bbox:
+      lon_min: 90.3790   # TODO_VERIFY
+      lat_min: 23.8330   # TODO_VERIFY
+      lon_max: 90.3920   # TODO_VERIFY
+      lat_max: 23.8450   # TODO_VERIFY
+    notes: "Mix of resettlement blocks and organic informal growth"
+
+  karail_extension:
+    type: informal
+    role: train_eval
+    description: "Periphery informal growth area"
+    bbox:
+      lon_min: 90.4180   # TODO_VERIFY
+      lat_min: 23.7900   # TODO_VERIFY
+      lon_max: 90.4290   # TODO_VERIFY
+      lat_max: 23.7990   # TODO_VERIFY
+    notes: "Extension of Karail slum; periphery informal"
+
+  old_dhaka:
+    type: formal_dense
+    role: train_eval
+    description: "Dense pucca masonry — the discriminator-killer control region"
+    bbox:
+      lon_min: 90.3940   # TODO_VERIFY
+      lat_min: 23.7090   # TODO_VERIFY
+      lon_max: 90.4160   # TODO_VERIFY
+      lat_max: 23.7260   # TODO_VERIFY
+    notes: "Brick core; very high building density; visually similar to slums at coarse resolution"
+
+  gulshan_baridhara:
+    type: formal_dense
+    role: train_eval
+    description: "Affluent, dense, road-connected, bright at night"
+    bbox:
+      lon_min: 90.4100   # TODO_VERIFY
+      lat_min: 23.7760   # TODO_VERIFY
+      lon_max: 90.4340   # TODO_VERIFY
+      lat_max: 23.8000   # TODO_VERIFY
+    notes: "Gulshan-2 and Baridhara; strong nighttime light; clear road grid"
+
+# Metadata
+metadata:
+  crs: EPSG:4326
+  tile_size_m: 2560        # 256 px × 10 m/px
+  target_resolution_m: 10  # Sentinel-2
+  gram_resolution_m: 1.2   # ESRI z16 tiles for GRAM baseline only

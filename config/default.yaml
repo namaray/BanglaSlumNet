@@ -1,0 +1,115 @@
+# BanglaSlumNet master config — all paths, hyperparams, and flags live here.
+# Never hardcode these values in source code.
+
+# ─── Paths ────────────────────────────────────────────────────────────────────
+paths:
+  project_root: null           # set at runtime (Drive path in Colab)
+  data_dir: data
+  tiles_dir: data/tiles
+  labels_dir: data/labels
+  socioeconomic_dir: data/socioeconomic
+  features_cache_dir: data/features_cache
+  results_dir: results
+  runs_dir: results/runs
+  figures_dir: results/figures
+  tables_dir: results/tables
+  manifest: data/dataset_manifest.json
+  confidence_json: data/labels/confidence.json
+  la_validation_json: data/labels/la_validation.json
+  registry: results/runs/registry.json
+  all_runs_csv: results/tables/all_runs.csv
+
+# ─── Experiment identity ──────────────────────────────────────────────────────
+seed: 1337
+git_commit: null               # filled at runtime
+
+# ─── Data ─────────────────────────────────────────────────────────────────────
+data:
+  tile_size: 256               # pixels (10 m/px → 2.56 km)
+  train_stride: 128            # 50% overlap for train tiles
+  eval_stride: 256             # no overlap for eval tiles
+  val_fraction: 0.15           # fraction of HC tiles held for val
+  s2_bands: [B2, B3, B4, B8]  # optical bands; add B11, B12 if D7=true
+  use_swir: false              # Decision D7
+  training_years: [2020, 2021, 2022, 2023]
+  seasons: [dry, wet]
+
+# ─── Weak labels ──────────────────────────────────────────────────────────────
+weak_labels:
+  viirs_percentile_threshold: 50   # city-median split for dark/bright
+  use_locate_anything_validation: true   # Direction B; set false to skip VLM pass
+
+# ─── LocateAnything ───────────────────────────────────────────────────────────
+locate_anything:
+  model_id: nvidia/LocateAnything-3B
+  dtype: bfloat16
+  load_in_4bit: false          # enable only on <24 GB GPU
+  generation_mode: slow        # slow=most robust for label validation
+  max_new_tokens: 512
+  feature_mode: hidden_state   # Decision D1: hidden_state | grounding_map
+  prompt_version: v1
+
+# ─── Model config ─────────────────────────────────────────────────────────────
+model:
+  config: full                 # baseline_cnn | vlm_visual | vlm_lang | full
+
+# SAS-Net
+sasnet:
+  encoder_dim: 256
+  style_dim: 128
+  num_res_blocks: 4
+
+# Fusion
+fusion:
+  d_model: 512
+  num_heads: 8
+  num_layers: 2
+  dropout: 0.1
+  socioeconomic_channels: [viirs, worldpop, ghspop, osm_roads, wb_poverty, ghsl_builtup]
+
+# Decoder
+decoder:
+  num_upsample_blocks: 3
+
+# Baseline CNN
+baseline_cnn:
+  backbone: segformer_b0       # segformer_b0 | resnet_unet
+
+# ─── Training ─────────────────────────────────────────────────────────────────
+train:
+  optimizer: adamw
+  lr: 3.0e-4
+  weight_decay: 0.01
+  lr_scheduler: cosine
+  batch_size: 16               # auto-reduced on OOM
+  epochs: 80
+  early_stopping_patience: 10
+  early_stopping_metric: hc_iou
+  mixed_precision: bf16
+  label_smoothing: 0.0         # set 0.05 to enable; gated here
+  dice_weight: 0.5
+  bce_weight: 0.5
+  slum_class_weight: 2.0       # up-weight slum class in BCE
+
+# SAS-Net specific
+train_sasnet:
+  lr: 1.0e-4
+  epochs: 50
+  lambda_consist: 1.0
+  lambda_rec: 1.0
+  lambda_swap: 0.5
+
+# ─── Experiment flags (Decision IDs from §15) ─────────────────────────────────
+decisions:
+  D1_feature_mode: hidden_state     # hidden_state | grounding_map
+  D2_lora_adapt: false              # LoRA on VLM LM layers
+  D3_atm_correction: classical      # classical | force_cmac
+  D4_generalization: loro           # loro | cross_city
+  D5_training_years: [2020, 2021, 2022, 2023]
+  D6_include_gram_headtohead: true  # include real GRAM eval
+  D7_use_swir: false                # include B11/B12
+
+# ─── Evaluation ───────────────────────────────────────────────────────────────
+eval:
+  iou_threshold: 0.5
+  primary_metric: hc_iou
