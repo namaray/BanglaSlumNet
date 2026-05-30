@@ -1,0 +1,119 @@
+# Experiment matrix — consumed by the orchestration cell in BanglaSlumNet_Colab.ipynb.
+# Each entry defines one run; the registry skips already-completed rows.
+
+experiments:
+
+  # ── Experiment 1: Atmospheric correction ablation ─────────────────────────
+  - id: exp1_raw_vlmvisual
+    experiment: exp1_sasnet_ablation
+    description: "Raw S2, no atmospheric correction, vlm_visual backbone"
+    overrides:
+      model.config: vlm_visual
+      decisions.D3_atm_correction: none
+
+  - id: exp1_classical_vlmvisual
+    experiment: exp1_sasnet_ablation
+    description: "Classical atmospheric correction (histogram-match / DOS), vlm_visual"
+    overrides:
+      model.config: vlm_visual
+      decisions.D3_atm_correction: classical
+
+  - id: exp1_sasnet_vlmvisual
+    experiment: exp1_sasnet_ablation
+    description: "SAS-Net normalized, vlm_visual — expected best"
+    overrides:
+      model.config: vlm_visual
+      decisions.D3_atm_correction: sasnet
+
+  # ── Experiment 2: Socioeconomic fusion ablation (CENTRAL) ─────────────────
+  - id: exp2_visual_only
+    experiment: exp2_fusion_ablation
+    description: "VLM visual features only, no language, no socioeconomics"
+    overrides:
+      model.config: vlm_visual
+      fusion.socioeconomic_channels: []
+
+  - id: exp2_vlm_lang
+    experiment: exp2_fusion_ablation
+    description: "+ language concept (discriminative prompt)"
+    overrides:
+      model.config: vlm_lang
+      fusion.socioeconomic_channels: []
+
+  - id: exp2_viirs_only
+    experiment: exp2_fusion_ablation
+    description: "+ nighttime lights (VIIRS)"
+    overrides:
+      model.config: vlm_lang
+      fusion.socioeconomic_channels: [viirs]
+
+  - id: exp2_viirs_pop
+    experiment: exp2_fusion_ablation
+    description: "+ population (WorldPop)"
+    overrides:
+      model.config: vlm_lang
+      fusion.socioeconomic_channels: [viirs, worldpop]
+
+  - id: exp2_viirs_pop_roads
+    experiment: exp2_fusion_ablation
+    description: "+ OSM roads"
+    overrides:
+      model.config: vlm_lang
+      fusion.socioeconomic_channels: [viirs, worldpop, osm_roads]
+
+  - id: exp2_viirs_pop_roads_poverty
+    experiment: exp2_fusion_ablation
+    description: "+ WB poverty"
+    overrides:
+      model.config: vlm_lang
+      fusion.socioeconomic_channels: [viirs, worldpop, osm_roads, wb_poverty]
+
+  - id: exp2_full
+    experiment: exp2_fusion_ablation
+    description: "Full fusion — all channels"
+    overrides:
+      model.config: full
+      fusion.socioeconomic_channels: [viirs, worldpop, ghspop, osm_roads, wb_poverty, ghsl_builtup]
+
+  - id: exp2_baseline_cnn
+    experiment: exp2_fusion_ablation
+    description: "Optical-only baseline (controlled GRAM analogue)"
+    overrides:
+      model.config: baseline_cnn
+      fusion.socioeconomic_channels: []
+
+  # ── Experiment 3: Leave-one-region-out generalization ─────────────────────
+  - id: exp3_loro_korail
+    experiment: exp3_loro
+    description: "LORO: held-out = korail"
+    overrides:
+      model.config: full
+      loro.held_out_region: korail
+
+  - id: exp3_loro_bhashantek
+    experiment: exp3_loro
+    description: "LORO: held-out = bhashantek"
+    overrides:
+      model.config: full
+      loro.held_out_region: bhashantek
+
+  - id: exp3_loro_karail_extension
+    experiment: exp3_loro
+    description: "LORO: held-out = karail_extension"
+    overrides:
+      model.config: full
+      loro.held_out_region: karail_extension
+
+  - id: exp3_loro_old_dhaka
+    experiment: exp3_loro
+    description: "LORO: held-out = old_dhaka (critical: FPR transfer test)"
+    overrides:
+      model.config: full
+      loro.held_out_region: old_dhaka
+
+  - id: exp3_loro_gulshan_baridhara
+    experiment: exp3_loro
+    description: "LORO: held-out = gulshan_baridhara"
+    overrides:
+      model.config: full
+      loro.held_out_region: gulshan_baridhara

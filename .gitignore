@@ -1,3 +1,55 @@
+# Existing
 slum_env/
 __pycache__/
 *.pyc
+
+# Data and large binary files
+data/tiles/
+data/labels/
+data/socioeconomic/
+data/features_cache/
+*.npy
+*.tif
+*.tiff
+
+# Results (keep .gitkeep)
+results/runs/*
+results/figures/*
+results/tables/*
+!results/runs/.gitkeep
+!results/figures/.gitkeep
+!results/tables/.gitkeep
+
+# Model caches
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.pyo
+.cache/
+huggingface/
+transformers_cache/
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Python packaging
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Colab / Drive
+*.gdrive
+drive/
+
+# IDE
+.vscode/
+.idea/
