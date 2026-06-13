@@ -10,16 +10,26 @@ The stub's video classes raise if actually used, so an accidental video code
 path fails loudly rather than silently mis-behaving.
 """
 
+import importlib.machinery
 import sys
 import types
 
 
 def ensure_decord() -> bool:
     """
-    Ensure a module named `decord` is importable. If the real package is present
-    it is used as-is; otherwise a stub is injected into sys.modules.
+    Ensure a module named `decord` is importable AND has a valid __spec__
+    (transformers calls importlib.util.find_spec("decord"), which raises
+    ValueError if a stub module's __spec__ is None). If the real package is
+    present it is used as-is; otherwise a stub with a proper spec is injected.
     Returns True if the real decord is available, False if the stub was used.
     """
+    existing = sys.modules.get("decord")
+    if existing is not None:
+        # Repair a previously-injected stub that lacks a __spec__.
+        if getattr(existing, "__spec__", None) is None:
+            existing.__spec__ = importlib.machinery.ModuleSpec("decord", loader=None)
+        return getattr(existing, "__version__", "") != "0.0.0-stub"
+
     try:
         import decord  # noqa: F401
         return True
@@ -27,6 +37,7 @@ def ensure_decord() -> bool:
         pass
 
     m = types.ModuleType("decord")
+    m.__spec__ = importlib.machinery.ModuleSpec("decord", loader=None)
 
     class _Bridge:
         def set_bridge(self, *args, **kwargs):
