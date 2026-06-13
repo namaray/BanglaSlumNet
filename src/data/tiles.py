@@ -62,6 +62,9 @@ class SlumTileDataset(Dataset):
         socioeconomic_channels: List[str],
         transform=None,
         use_hc_only: bool = False,
+        features_cache_dir: Optional[str] = None,
+        model_config: Optional[str] = None,
+        use_clean_tiles: bool = True,
     ):
         self.split = split
         self.tiles_dir = Path(tiles_dir)
@@ -70,6 +73,10 @@ class SlumTileDataset(Dataset):
         self.socioeconomic_channels = socioeconomic_channels
         self.transform = transform
         self.use_hc_only = use_hc_only
+        self.features_cache_dir = Path(features_cache_dir) if features_cache_dir else None
+        self.model_config = model_config
+        self.use_clean_tiles = use_clean_tiles
+        self.prompt_ids = self._resolve_prompt_ids(model_config)
 
         with open(manifest_path) as f:
             manifest = json.load(f)
@@ -77,6 +84,19 @@ class SlumTileDataset(Dataset):
         self.tiles = [t for t in manifest["tiles"] if t["split"] == split]
         if use_hc_only:
             self.tiles = [t for t in self.tiles if t.get("hc_pixel_count", 0) > 0]
+
+    @staticmethod
+    def _resolve_prompt_ids(model_config: Optional[str]) -> List[str]:
+        """Which cached feature prompt files a config needs (matches FeatureExtractor)."""
+        if model_config is None or model_config == "baseline_cnn":
+            return []
+        try:
+            from ..locate_anything.prompts import PROMPT_VERSION as pv
+        except Exception:
+            pv = "v1"
+        if model_config == "vlm_visual":
+            return [f"neutral_{pv}"]
+        return [f"slum_{pv}", f"formal_{pv}"]  # vlm_lang, full
 
     def __len__(self):
         return len(self.tiles)
@@ -98,6 +118,14 @@ class SlumTileDataset(Dataset):
         _assert_aligned(f"{tile_id}_rgb", rgb_transform, rgb.shape[-2:],
                         f"{tile_id}_socioec", eco_transform, socioec.shape[-2:])
 
+        # Prefer SAS-Net clean (reference-appearance) tile if it has been cached
+        if self.use_clean_tiles:
+            clean_path = self.tiles_dir / f"{tile_id}_clean.npy"
+            if clean_path.exists():
+                clean = np.load(str(clean_path)).astype(np.float32)
+                if clean.shape[-2:] == rgb.shape[-2:]:
+                    rgb = clean
+
         sample = {
             "rgb": torch.from_numpy(rgb).float(),
             "label": torch.from_numpy(label).long(),
@@ -105,13 +133,31 @@ class SlumTileDataset(Dataset):
             "socioec": torch.from_numpy(socioec).float(),
             "tile_id": tile_id,
             "region": meta["region"],
-            "split": split,
+            "split": self.split,
         }
+
+        # Cached MoonViT features for VLM configs (concatenated across prompts)
+        if self.prompt_ids and self.features_cache_dir is not None:
+            sample["cached_feats"] = self._load_cached_feats(tile_id)
 
         if self.transform:
             sample = self.transform(sample)
 
         return sample
+
+    def _load_cached_feats(self, tile_id: str) -> torch.Tensor:
+        """Load and channel-concatenate per-prompt cached features [D*n, H_f, W_f]."""
+        feats = []
+        for pid in self.prompt_ids:
+            path = self.features_cache_dir / f"{tile_id}_{pid}.npy"
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Missing cached feature {path}. Run feature extraction (Phase 3) "
+                    f"for config '{self.model_config}', or run preflight to catch this on CPU."
+                )
+            feats.append(np.load(str(path)).astype(np.float32))
+        arr = np.concatenate(feats, axis=0) if len(feats) > 1 else feats[0]
+        return torch.from_numpy(arr).float()
 
     def _load_rgb(self, tile_id: str) -> Tuple[np.ndarray, Affine]:
         path = self.tiles_dir / f"{tile_id}_rgb.tif"
@@ -232,10 +278,25 @@ def build_dataset_manifest(
             "split": None,
         })
 
-    # Spatial split: HC tiles → val+test; all others → train
-    hc_tiles = [r for r in records if r["hc_pixel_count"] > 0]
+    return build_manifest_from_records(records, output_path, val_fraction, seed)
+
+
+def build_manifest_from_records(
+    records: List[Dict],
+    output_path: str,
+    val_fraction: float = 0.15,
+    seed: int = 1337,
+) -> str:
+    """
+    Assign train/val/test splits to pre-built tile records and write the manifest.
+    Spatial split: HC tiles -> val+test; all others -> train (prevents leakage).
+    Returns the manifest path.
+    """
+    rng = np.random.default_rng(seed)
+
+    hc_tiles = [r for r in records if r.get("hc_pixel_count", 0) > 0]
     rng.shuffle(hc_tiles)
-    n_val = max(1, int(len(hc_tiles) * val_fraction))
+    n_val = max(1, int(len(hc_tiles) * val_fraction)) if hc_tiles else 0
     val_ids = {t["tile_id"] for t in hc_tiles[:n_val]}
     test_ids = {t["tile_id"] for t in hc_tiles[n_val:]}
 
@@ -247,19 +308,14 @@ def build_dataset_manifest(
         else:
             r["split"] = "train"
 
-    manifest = {
-        "version": "1.0",
-        "n_tiles": len(records),
-        "tiles": records,
-    }
-
+    manifest = {"version": "1.0", "n_tiles": len(records), "tiles": records}
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(manifest, f, indent=2)
 
     print(f"Manifest written: {output_path} ({len(records)} tiles, "
           f"{len(val_ids)} val, {len(test_ids)} test)")
-    return manifest
+    return output_path
 
 
 # ── Synthetic smoke test ───────────────────────────────────────────────────────
