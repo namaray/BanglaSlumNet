@@ -143,7 +143,15 @@ def tile_region(
                 with rasterio.open(socioec_path) as se:
                     desc = list(se.descriptions) if se.descriptions else []
                     band_map = {d.lower(): i + 1 for i, d in enumerate(desc) if d}
-                bands = [band_map.get(ch.lower(), 0) for ch in socioeconomic_channels]
+                    n_src_bands = se.count
+                if band_map:
+                    bands = [band_map.get(ch.lower(), 0) for ch in socioeconomic_channels]
+                elif n_src_bands >= len(socioeconomic_channels):
+                    # No band descriptions in the GeoTIFF: fall back to config order
+                    # (the ee export writes bands in socioeconomic_channels order).
+                    bands = [i + 1 for i in range(len(socioeconomic_channels))]
+                else:
+                    bands = [0] * len(socioeconomic_channels)
                 eco = np.zeros((len(socioeconomic_channels), tile, tile), dtype=np.float32)
                 present = [b for b in bands if b > 0]
                 if present:
