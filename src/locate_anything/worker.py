@@ -78,6 +78,11 @@ class LocateAnythingWorker:
         if self.model is not None:
             return
 
+        # LocateAnything's remote code requires `decord`; inject a stub if absent
+        # (we use image grounding only, never video). See _compat.ensure_decord.
+        from ._compat import ensure_decord
+        ensure_decord()
+
         print(f"Loading {self.model_id} (trust_remote_code=True) ...")
 
         quant_config = None

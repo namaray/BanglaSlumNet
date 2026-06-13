@@ -12,6 +12,16 @@ from pathlib import Path
 
 
 def download_locate_anything(cache_dir: str):
+    # Ensure `decord` is importable (stub if needed) before transformers loads
+    # the model's trust_remote_code modules. Image-only use; see _compat.
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        from src.locate_anything._compat import ensure_decord
+        ensure_decord()
+    except Exception as e:
+        print(f"(decord stub bootstrap skipped: {e})")
+
     from transformers import AutoModel, AutoProcessor
 
     print(f"Downloading nvidia/LocateAnything-3B to {cache_dir} ...")
