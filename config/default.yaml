@@ -46,7 +46,9 @@ locate_anything:
   load_in_4bit: false          # enable only on <24 GB GPU
   generation_mode: slow        # slow=most robust for label validation
   max_new_tokens: 512
-  feature_mode: hidden_state   # Decision D1: hidden_state | grounding_map
+  feature_mode: grounding_map  # Decision D1: hidden_state | grounding_map
+                               # grounding_map = prompt-specific (needed for the
+                               # language ablation); hidden_state = prompt-agnostic visual
   prompt_version: v1
 
 # ─── Model config ─────────────────────────────────────────────────────────────
@@ -101,7 +103,7 @@ train_sasnet:
 
 # ─── Experiment flags (Decision IDs from §15) ─────────────────────────────────
 decisions:
-  D1_feature_mode: hidden_state     # hidden_state | grounding_map
+  D1_feature_mode: grounding_map    # hidden_state | grounding_map
   D2_lora_adapt: false              # LoRA on VLM LM layers
   D3_atm_correction: classical      # classical | force_cmac
   D4_generalization: loro           # loro | cross_city
