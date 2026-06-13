@@ -1,35 +1,36 @@
-# Colab install order — run in this sequence to avoid dependency conflicts.
-# DO NOT install MagiAttention — not available on Ampere (A100/Colab).
+# Colab install list (Python 3.12). DO NOT install MagiAttention (Ampere unsupported).
+#
+# Colab already ships numpy, Pillow, pandas, matplotlib, scipy, scikit-learn, torch.
+# We deliberately do NOT hard-pin those: the spec's numpy==1.25.0 / Pillow==11.1.0
+# have no Python 3.12 wheel and break the install. Let pip keep Colab's versions.
 
-# Step 1: Install pinned LocateAnything deps first
+# ── LocateAnything core (required) ───────────────────────────────────────────
 transformers==4.57.1
-opencv-python-headless==4.11.0.86
-numpy==1.25.0
-Pillow==11.1.0
-decord==0.6.0
-lmdb==1.7.5
 peft
+opencv-python-headless
 
-# Step 2: Geo stack
+# ── Geo stack ────────────────────────────────────────────────────────────────
 rasterio
 geopandas
 shapely
 pyproj
 
-# Earth Engine (Python export path — in-notebook alternative to the GEE Code Editor)
+# ── Earth Engine (Python export path) ────────────────────────────────────────
 earthengine-api
 geemap
 folium
 
-# Step 3: Training / utilities
+# ── Training / utilities ─────────────────────────────────────────────────────
 timm
 einops
 omegaconf
 pyyaml
 tqdm
-scikit-learn
 scikit-image
-pandas
-seaborn
-matplotlib
-scipy
+
+# ── Key-value store some LocateAnything remote code references ────────────────
+lmdb
+
+# NOTE: `decord` (video reader) is intentionally omitted — no Python 3.12 wheel.
+# Our use is image-only. If the model load (P1.2) errors on a missing `decord`,
+# install `eva-decord` then (a maintained fork), not the original decord.
