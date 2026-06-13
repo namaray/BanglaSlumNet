@@ -114,14 +114,15 @@ class FeatureExtractor:
             warnings.warn("[FeatureExtractor] hidden_state hook returned None; using grounding_map.")
             mode = "grounding_map"
 
-        # grounding_map mode
+        # grounding_map mode — rasterize boxes onto a small grid; the decoder
+        # upsamples from here, so keep it modest (32x32), not full tile resolution.
         maps = self.worker.extract_grounding_map_features(
             image, [prompt],
             generation_mode=self.generation_mode,
             max_new_tokens=self.max_new_tokens,
-            out_size=(self.feature_grid_hw[0] * 16, self.feature_grid_hw[1] * 16),
+            out_size=(32, 32),
         )
-        return maps[0:1]  # [1, H, W] — single-channel grounding map
+        return maps[0:1]  # [1, 32, 32] — single-channel grounding coverage map
 
     def _prompts_for_config(self, model_config: str) -> Dict[str, str]:
         """Return {prompt_id: prompt_text} for the given config."""

@@ -74,6 +74,7 @@ def tile_region(
     la_validation: Optional[Dict] = None,
     use_la: bool = False,
     viirs_percentile_threshold: float = 50.0,
+    composite_tag: Optional[str] = None,
 ) -> List[Dict]:
     """
     Tile one region. Returns list of per-tile metadata dicts.
@@ -84,6 +85,7 @@ def tile_region(
     out_labels_dir = Path(out_labels_dir); out_labels_dir.mkdir(parents=True, exist_ok=True)
     out_socioec_dir = Path(out_socioec_dir); out_socioec_dir.mkdir(parents=True, exist_ok=True)
 
+    tag = composite_tag or region
     records = []
     with rasterio.open(s2_path) as s2:
         s2_crs = s2.crs
@@ -91,7 +93,7 @@ def tile_region(
         n_s2_bands = min(s2_band_count, s2.count)
 
         for r, c, win in _windows(width, height, tile, stride):
-            tile_id = f"{region}_{r:03d}_{c:03d}"
+            tile_id = f"{tag}_{r:03d}_{c:03d}"
             rgb_out = out_tiles_dir / f"{tile_id}_rgb.tif"
             noisy_out = out_labels_dir / f"{tile_id}_noisy.tif"
             hcgeo_out = out_labels_dir / f"{tile_id}_hcgeo.tif"  # 3-signal geo HC (preserved)
@@ -263,29 +265,36 @@ def tile_all_regions(
     with open(regions_yaml) as f:
         regions = yaml.safe_load(f)["regions"]
 
+    import glob as _glob
     all_records = []
     for region in regions:
-        s2_path = str(Path(paths["tiles_dir"]) / f"s2_{region}_{year}_{season}.tif")
-        if not Path(s2_path).exists():
-            print(f"  [skip] no S2 composite for {region}: {s2_path}")
-            continue
         labels_path = str(Path(paths["labels_dir"]) / f"weeklabels_{region}.tif")
         socioec_path = str(Path(paths["socioeconomic_dir"]) / f"socioeconomic_{region}.tif")
-
-        recs = tile_region(
-            region=region, s2_path=s2_path,
-            labels_path=labels_path if Path(labels_path).exists() else None,
-            socioec_path=socioec_path if Path(socioec_path).exists() else None,
-            out_tiles_dir=paths["tiles_dir"], out_labels_dir=paths["labels_dir"],
-            out_socioec_dir=paths["socioeconomic_dir"],
-            s2_band_count=len(s2_bands), socioeconomic_channels=eco_channels,
-            tile=data_cfg.get("tile_size", 256), stride=data_cfg.get("train_stride", 128),
-            la_validation=la_validation,
-            use_la=config.get("weak_labels", {}).get("use_locate_anything_validation", False) and la_validation is not None,
-            viirs_percentile_threshold=config.get("weak_labels", {}).get("viirs_percentile_threshold", 50.0),
-        )
-        all_records.extend(recs)
-        print(f"  {region}: {len(recs)} tiles")
+        # Tile EVERY available S2 composite for this region (all years/seasons that
+        # downloaded), multiplying the tile count and adding temporal variety.
+        comps = sorted(_glob.glob(str(Path(paths["tiles_dir"]) / f"s2_{region}_*.tif")))
+        comps = [c for c in comps if Path(c).name.startswith(f"s2_{region}_")]
+        if not comps:
+            print(f"  [skip] no S2 composites for {region}")
+            continue
+        region_total = 0
+        for s2_path in comps:
+            tag = Path(s2_path).stem[len("s2_"):]   # e.g. "korail_2020_dry"
+            recs = tile_region(
+                region=region, composite_tag=tag, s2_path=s2_path,
+                labels_path=labels_path if Path(labels_path).exists() else None,
+                socioec_path=socioec_path if Path(socioec_path).exists() else None,
+                out_tiles_dir=paths["tiles_dir"], out_labels_dir=paths["labels_dir"],
+                out_socioec_dir=paths["socioeconomic_dir"],
+                s2_band_count=len(s2_bands), socioeconomic_channels=eco_channels,
+                tile=data_cfg.get("tile_size", 256), stride=data_cfg.get("train_stride", 128),
+                la_validation=la_validation,
+                use_la=config.get("weak_labels", {}).get("use_locate_anything_validation", False) and la_validation is not None,
+                viirs_percentile_threshold=config.get("weak_labels", {}).get("viirs_percentile_threshold", 50.0),
+            )
+            all_records.extend(recs)
+            region_total += len(recs)
+        print(f"  {region}: {region_total} tiles from {len(comps)} composites")
 
     manifest_path = build_manifest_from_records(
         all_records, output_path=paths["manifest"],
