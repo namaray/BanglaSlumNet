@@ -36,7 +36,7 @@ def load_gram_predictions(gram_output_dir: str, tile_ids) -> torch.Tensor:
                 arr = np.full((256, 256), 0.5, dtype=np.float32)
         # Resize to 256×256 if needed
         if arr.shape != (256, 256):
-            import torch.nn.functional as F as _F
+            import torch.nn.functional as _F
             t = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0).float()
             arr = _F.interpolate(t, (256, 256), mode="bilinear", align_corners=False).squeeze().numpy()
         preds.append(arr)

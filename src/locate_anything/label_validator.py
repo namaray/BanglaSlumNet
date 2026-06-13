@@ -91,7 +91,14 @@ def run_label_validation(
 
     worker.load()
 
-    for i, tile_id in enumerate(tile_ids):
+    try:
+        from tqdm.auto import tqdm
+    except ImportError:
+        def tqdm(x, **k):
+            return x
+
+    pbar = tqdm(tile_ids, desc="LA validation", unit="tile")
+    for i, tile_id in enumerate(pbar):
         if tile_id in results:
             continue
 

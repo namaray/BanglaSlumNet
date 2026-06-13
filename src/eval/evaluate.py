@@ -39,8 +39,14 @@ def evaluate(
     all_preds, all_labels, all_hc = [], [], []
     all_regions = []
 
+    try:
+        from tqdm.auto import tqdm
+    except ImportError:
+        def tqdm(x, **k):
+            return x
+
     with torch.no_grad():
-        for batch in data_loader:
+        for batch in tqdm(data_loader, desc=f"Eval {run_id}", unit="batch", leave=False):
             rgb = batch["rgb"].to(device)
             label = batch["label"].to(device)
             hc_mask = batch.get("hc_mask", None)
