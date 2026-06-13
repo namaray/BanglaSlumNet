@@ -150,16 +150,15 @@ class FeatureExtractor:
         """
         self.worker.load()
 
-        # Assert vision encoder is frozen
+        # Freeze the whole VLM (we never train it — frozen MoonViT, §2.3) then verify.
+        for p in self.worker.model.parameters():
+            p.requires_grad = False
         enc = self.worker._resolve_vision_encoder()
         if enc is not None:
             frozen = all(not p.requires_grad for p in enc.parameters())
-            assert frozen, (
-                "Vision encoder parameters are not frozen! "
-                "Set requires_grad=False on the entire vision encoder before extraction."
-            )
+            assert frozen, "Vision encoder not frozen after requires_grad=False — unexpected."
             n_params = sum(p.numel() for p in enc.parameters())
-            print(f"[FeatureExtractor] Vision encoder: {n_params:,} params (all frozen)")
+            print(f"[FeatureExtractor] Vision encoder: {n_params:,} params (frozen)")
 
         try:
             from tqdm.auto import tqdm
