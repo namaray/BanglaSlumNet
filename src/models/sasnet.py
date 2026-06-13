@@ -51,19 +51,28 @@ class SceneEncoder(nn.Module):
 
 
 class AppearanceEncoder(nn.Module):
-    def __init__(self, in_channels: int = 4, style_dim: int = 128):
+    """
+    Encodes appearance into a style code (style_dim) then projects to per-channel
+    AdaIN parameters of size out_dim (= the scene-feature channel count), so the
+    style mean/std line up with the features AdaIN modulates.
+    """
+    def __init__(self, in_channels: int = 4, style_dim: int = 128, out_dim: int = 256):
         super().__init__()
         self.net = nn.Sequential(
             nn.AdaptiveAvgPool2d(8),
             nn.Flatten(),
             nn.Linear(in_channels * 64, 256), nn.ReLU(inplace=True),
-            nn.Linear(256, style_dim * 2),
+            nn.Linear(256, style_dim), nn.ReLU(inplace=True),
         )
+        self.to_mean = nn.Linear(style_dim, out_dim)
+        self.to_std = nn.Linear(style_dim, out_dim)
         self.style_dim = style_dim
+        self.out_dim = out_dim
 
     def forward(self, x: torch.Tensor):
-        out = self.net(x)
-        mean, std = out[:, :self.style_dim], F.softplus(out[:, self.style_dim:]) + 1e-5
+        code = self.net(x)                       # [B, style_dim]
+        mean = self.to_mean(code)                # [B, out_dim]
+        std = F.softplus(self.to_std(code)) + 1e-5
         return mean, std
 
 
@@ -99,12 +108,13 @@ class SASNet(nn.Module):
     ):
         super().__init__()
         self.scene_encoder = SceneEncoder(in_channels, encoder_dim, n_res)
-        self.appearance_encoder = AppearanceEncoder(in_channels, style_dim)
+        # AdaIN params must match the scene-feature channel count (encoder_dim).
+        self.appearance_encoder = AppearanceEncoder(in_channels, style_dim, out_dim=encoder_dim)
         self.renderer = Renderer(encoder_dim, in_channels)
 
         # Fixed reference appearance (zero mean, unit std → normalized appearance)
-        self.register_buffer("ref_mean", torch.zeros(style_dim))
-        self.register_buffer("ref_std", torch.ones(style_dim))
+        self.register_buffer("ref_mean", torch.zeros(encoder_dim))
+        self.register_buffer("ref_std", torch.ones(encoder_dim))
 
     def forward(self, x: torch.Tensor, ref_appearance: bool = False):
         """
