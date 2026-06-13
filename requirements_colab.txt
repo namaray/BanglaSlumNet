@@ -16,6 +16,11 @@ geopandas
 shapely
 pyproj
 
+# Earth Engine (Python export path — in-notebook alternative to the GEE Code Editor)
+earthengine-api
+geemap
+folium
+
 # Step 3: Training / utilities
 timm
 einops
