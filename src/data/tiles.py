@@ -210,9 +210,9 @@ class SlumTileDataset(Dataset):
     @staticmethod
     def _assert_shape(arr: np.ndarray, tile_id: str, name: str):
         h, w = arr.shape[-2], arr.shape[-1]
-        assert h == 256 and w == 256, (
-            f"Expected 256×256 tile for {tile_id} ({name}), got {h}×{w}. "
-            "Re-export tiles with the correct tile_size."
+        assert h == w and h > 0, (
+            f"Expected a square tile for {tile_id} ({name}), got {h}×{w}. "
+            "Re-tile with a consistent tile_size."
         )
 
 
@@ -294,17 +294,25 @@ def build_manifest_from_records(
     """
     rng = np.random.default_rng(seed)
 
-    hc_tiles = [r for r in records if r.get("hc_pixel_count", 0) > 0]
-    rng.shuffle(hc_tiles)
-    n_val = max(1, int(len(hc_tiles) * val_fraction)) if hc_tiles else 0
-    val_ids = {t["tile_id"] for t in hc_tiles[:n_val]}
-    test_ids = {t["tile_id"] for t in hc_tiles[n_val:]}
+    # Proper train/val/test split over ALL tiles (train must not be empty).
+    # Prefer tiles that contain HC pixels for val/test so HC-IoU is computable,
+    # but keep the majority for training (using their noisy labels).
+    order = list(records)
+    rng.shuffle(order)
+    n = len(order)
+    n_test = max(1, int(round(n * val_fraction))) if n >= 3 else 0
+    n_val = max(1, int(round(n * val_fraction))) if n >= 3 else 0
+
+    # Put HC-bearing tiles first so they fall into val/test preferentially.
+    order.sort(key=lambda r: r.get("hc_pixel_count", 0), reverse=True)
+    test_ids = {t["tile_id"] for t in order[:n_test]}
+    val_ids = {t["tile_id"] for t in order[n_test:n_test + n_val]}
 
     for r in records:
-        if r["tile_id"] in val_ids:
-            r["split"] = "val"
-        elif r["tile_id"] in test_ids:
+        if r["tile_id"] in test_ids:
             r["split"] = "test"
+        elif r["tile_id"] in val_ids:
+            r["split"] = "val"
         else:
             r["split"] = "train"
 

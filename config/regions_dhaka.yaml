@@ -8,55 +8,55 @@ regions:
     role: train_eval
     description: "Largest Dhaka slum, beside Gulshan lake"
     bbox:
-      lon_min: 90.3980   # ESTIMATE — confirm on P1.3 map
-      lat_min: 23.7800   # ESTIMATE
-      lon_max: 90.4130   # ESTIMATE
-      lat_max: 23.7940   # ESTIMATE
-    notes: "Adjacent to Gulshan/Banani Lake; dense informal settlement (~1.5 km box)"
+      lon_min: 90.3905   # ~3 km box (centered on Korail)
+      lat_min: 23.7735
+      lon_max: 90.4205
+      lat_max: 23.8005
+    notes: "Adjacent to Gulshan/Banani Lake; dense informal settlement (~3 km box)"
 
   bhashantek:
     type: informal
     role: train_eval
     description: "Government-resettlement + informal mix"
     bbox:
-      lon_min: 90.3770   # ESTIMATE — confirm on P1.3 map
-      lat_min: 23.8180   # ESTIMATE
-      lon_max: 90.3920   # ESTIMATE
-      lat_max: 23.8320   # ESTIMATE
-    notes: "Near Mirpur/Cantonment; resettlement blocks + organic informal growth"
+      lon_min: 90.3695   # ~3 km box (centered on Bhashantek)
+      lat_min: 23.8115
+      lon_max: 90.3995
+      lat_max: 23.8385
+    notes: "Near Mirpur/Cantonment; resettlement blocks + organic informal growth (~3 km box)"
 
   karail_extension:
     type: informal
     role: train_eval
     description: "Periphery informal growth area"
     bbox:
-      lon_min: 90.4080   # ESTIMATE — confirm on P1.3 map
-      lat_min: 23.7850   # ESTIMATE
-      lon_max: 90.4180   # ESTIMATE
-      lat_max: 23.7930   # ESTIMATE
-    notes: "East periphery of Korail toward Mohakhali; informal growth"
+      lon_min: 90.3980   # ~3 km box (east periphery of Korail toward Mohakhali)
+      lat_min: 23.7755
+      lon_max: 90.4280
+      lat_max: 23.8025
+    notes: "East periphery of Korail toward Mohakhali; informal growth (~3 km box, adjacent to Korail)"
 
   old_dhaka:
     type: formal_dense
     role: train_eval
     description: "Dense pucca masonry — the discriminator-killer control region"
     bbox:
-      lon_min: 90.3950   # ESTIMATE — confirm on P1.3 map
-      lat_min: 23.7020   # ESTIMATE
-      lon_max: 90.4180   # ESTIMATE
-      lat_max: 23.7200   # ESTIMATE
-    notes: "Historic brick core near the river; very high building density (~2.3 km box)"
+      lon_min: 90.3915   # ~3 km box (historic brick core near the river)
+      lat_min: 23.6975
+      lon_max: 90.4215
+      lat_max: 23.7245
+    notes: "Historic brick core near the river; very high building density (~3 km box)"
 
   gulshan_baridhara:
     type: formal_dense
     role: train_eval
     description: "Affluent, dense, road-connected, bright at night"
     bbox:
-      lon_min: 90.4100   # ESTIMATE — confirm on P1.3 map
-      lat_min: 23.7850   # ESTIMATE
-      lon_max: 90.4320   # ESTIMATE
-      lat_max: 23.8080   # ESTIMATE
-    notes: "Gulshan-2 + Baridhara; strong nighttime light; clear road grid (~2.5 km box)"
+      lon_min: 90.4060   # ~3 km box (Gulshan-2 + Baridhara)
+      lat_min: 23.7825
+      lon_max: 90.4360
+      lat_max: 23.8095
+    notes: "Gulshan-2 + Baridhara; strong nighttime light; clear road grid (~3 km box)"
 
 # Metadata
 metadata:

@@ -25,9 +25,9 @@ git_commit: null               # filled at runtime
 
 # ─── Data ─────────────────────────────────────────────────────────────────────
 data:
-  tile_size: 256               # pixels (10 m/px → 2.56 km)
-  train_stride: 128            # 50% overlap for train tiles
-  eval_stride: 256             # no overlap for eval tiles
+  tile_size: 128               # pixels (10 m/px → 1.28 km); small to fit tight Dhaka neighborhoods
+  train_stride: 64             # 50% overlap for train tiles
+  eval_stride: 128             # no overlap for eval tiles
   val_fraction: 0.15           # fraction of HC tiles held for val
   s2_bands: [B2, B3, B4, B8]  # optical bands; add B11, B12 if D7=true
   use_swir: false              # Decision D7

@@ -60,10 +60,13 @@ class BanglaSlumNet(nn.Module):
         num_upsample_blocks: int = 3,
         # Baseline
         baseline_backbone: str = "segformer_b0",
+        # Output spatial size (= tile size)
+        tile_size: int = 256,
     ):
         super().__init__()
         self.backbone_config = backbone_config
         self.socioeconomic_channels = socioeconomic_channels or []
+        self.tile_size = tile_size
 
         if backbone_config == "baseline_cnn":
             self.backbone = BaselineCNN(backbone=baseline_backbone, in_channels=in_channels)
@@ -122,7 +125,7 @@ class BanglaSlumNet(nn.Module):
                 socioec_r = socioec
             V = self.fusion(V, socioec_r, channel_mask=channel_mask)
 
-        return self.decoder(V)
+        return self.decoder(V, target_size=self.tile_size)
 
     def count_trainable_params(self) -> Dict[str, int]:
         total = sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -154,6 +157,7 @@ def build_model(config: dict) -> BanglaSlumNet:
         fusion_dropout=config.get("fusion", {}).get("dropout", 0.1),
         num_upsample_blocks=config.get("decoder", {}).get("num_upsample_blocks", 3),
         baseline_backbone=config.get("baseline_cnn", {}).get("backbone", "segformer_b0"),
+        tile_size=config.get("data", {}).get("tile_size", 256),
     )
     return model
 

@@ -95,8 +95,8 @@ class SegFormerLite(nn.Module):
                      for f in feats]
         fused = self.fuse(torch.cat(upsampled, dim=1))
         out = self.head(fused)
-        # Upsample to 256×256
-        out = F.interpolate(out, size=(256, 256), mode="bilinear", align_corners=False)
+        # Upsample back to the input tile size
+        out = F.interpolate(out, size=x.shape[-2:], mode="bilinear", align_corners=False)
         return torch.sigmoid(out)
 
 
