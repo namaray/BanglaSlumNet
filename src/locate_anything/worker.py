@@ -199,7 +199,13 @@ class LocateAnythingWorker:
         self._vision_encoder = enc
 
         def _hook(module, inp, out):
-            self._hook_output = (out[0] if isinstance(out, tuple) else out).detach()
+            # MoonViT returns a list[Tensor] (native-resolution, per-image); also
+            # handle tuple/tensor. Capture the first tensor found.
+            t = out
+            while isinstance(t, (list, tuple)) and len(t) > 0:
+                t = t[0]
+            if isinstance(t, torch.Tensor):
+                self._hook_output = t.detach()
 
         self._hook_handle = enc.register_forward_hook(_hook)
         print("[LocateAnything] Feature hook registered on vision encoder.")
