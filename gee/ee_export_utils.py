@@ -90,13 +90,21 @@ def export_image(image, region_geom, out_path: str, scale: int = 10,
         print(f"  [skip] exists: {os.path.basename(out_path)}")
         return out_path
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    geemap.ee_export_image(
-        image.clip(region_geom),
-        filename=out_path,
-        scale=scale,
-        region=region_geom,
-        crs=crs,
-        file_per_band=False,
-    )
+    try:
+        geemap.ee_export_image(
+            image.clip(region_geom),
+            filename=out_path,
+            scale=scale,
+            region=region_geom,
+            crs=crs,
+            file_per_band=False,
+        )
+    except Exception as e:
+        print(f"  [FAILED] {os.path.basename(out_path)}: {e}")
+        return None
+    # geemap may print an error and skip writing (e.g. empty/cloudy composite -> no bands)
+    if not os.path.exists(out_path):
+        print(f"  [FAILED] {os.path.basename(out_path)} (no file written — likely empty composite)")
+        return None
     print(f"  [done] {os.path.basename(out_path)}")
     return out_path
