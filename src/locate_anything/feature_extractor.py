@@ -160,8 +160,15 @@ class FeatureExtractor:
             n_params = sum(p.numel() for p in enc.parameters())
             print(f"[FeatureExtractor] Vision encoder: {n_params:,} params (all frozen)")
 
+        try:
+            from tqdm.auto import tqdm
+        except ImportError:
+            def tqdm(x, **k):
+                return x
+
         skipped = 0
-        for i, tile_id in enumerate(tile_ids):
+        iterator = tqdm(tile_ids, desc="MoonViT features", unit="tile") if verbose else tile_ids
+        for tile_id in iterator:
             prompts = self._prompts_for_config(model_config)
             all_cached = all(self._is_cached(tile_id, pid) for pid in prompts)
             if all_cached:
@@ -170,8 +177,6 @@ class FeatureExtractor:
 
             image = image_loader(tile_id)
             self.extract(tile_id, image, model_config)
-            if verbose and i % 50 == 0:
-                print(f"  [{i+1}/{len(tile_ids)}] {tile_id}")
 
         print(f"Feature extraction complete. {skipped} tiles skipped (cached).")
 

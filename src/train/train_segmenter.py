@@ -78,11 +78,18 @@ def train_segmenter(
     scaler = torch.cuda.amp.GradScaler(enabled=(device == "cuda"))
     amp_dtype = torch.bfloat16
 
+    try:
+        from tqdm.auto import tqdm
+    except ImportError:
+        def tqdm(x, **k):
+            return x
+
     for epoch in range(start_epoch, epochs):
         model.train()
         train_loss = 0.0
 
-        for batch in train_loader:
+        pbar = tqdm(train_loader, desc=f"[{run_id}] epoch {epoch+1}/{epochs}", unit="batch", leave=False)
+        for batch in pbar:
             rgb = batch["rgb"].to(device)
             label = batch["label"].to(device)
             hc_mask = batch.get("hc_mask", None)
@@ -103,6 +110,7 @@ def train_segmenter(
             scaler.step(optimizer)
             scaler.update()
             train_loss += loss.item()
+            pbar.set_postfix(loss=f"{loss.item():.4f}")
 
         train_loss /= max(len(train_loader), 1)
         scheduler.step()

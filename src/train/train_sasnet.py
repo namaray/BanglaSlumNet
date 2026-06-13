@@ -69,10 +69,17 @@ def train_sasnet(
     scaler = torch.cuda.amp.GradScaler(enabled=(device == "cuda"))
     amp_dtype = torch.bfloat16
 
+    try:
+        from tqdm.auto import tqdm
+    except ImportError:
+        def tqdm(x, **k):
+            return x
+
     for epoch in range(start_epoch, epochs):
         model.train()
         train_loss = 0.0
-        for batch in train_loader:
+        pbar = tqdm(train_loader, desc=f"[SASNet] epoch {epoch+1}/{epochs}", unit="batch", leave=False)
+        for batch in pbar:
             # batch should contain two time-steps of the same location
             I_t1 = batch["rgb"].to(device)
             I_t2 = batch.get("rgb_t2", I_t1).to(device)
@@ -91,6 +98,7 @@ def train_sasnet(
             scaler.step(optimizer)
             scaler.update()
             train_loss += loss.item()
+            pbar.set_postfix(loss=f"{loss.item():.4f}")
 
         train_loss /= max(len(train_loader), 1)
 
@@ -151,8 +159,14 @@ def cache_clean_tiles(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    try:
+        from tqdm.auto import tqdm
+    except ImportError:
+        def tqdm(x, **k):
+            return x
+
     with torch.no_grad():
-        for batch in data_loader:
+        for batch in tqdm(data_loader, desc="Caching clean tiles", unit="batch"):
             tile_ids = batch["tile_id"]
             rgb = batch["rgb"].to(device)
             clean = model.clean_tile(rgb).cpu().numpy()  # [B, C, 256, 256]
