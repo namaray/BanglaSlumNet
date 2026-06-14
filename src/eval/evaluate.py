@@ -32,8 +32,11 @@ def evaluate(
     results_dir.mkdir(parents=True, exist_ok=True)
 
     model = build_model(config).to(device)
-    ckpt = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(ckpt["model"])
+    if checkpoint_path and Path(checkpoint_path).exists():
+        ckpt = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(ckpt["model"])
+    else:
+        print(f"[evaluate] WARNING: no checkpoint ({checkpoint_path}); evaluating untrained model.")
     model.eval()
 
     all_preds, all_labels, all_hc = [], [], []

@@ -19,7 +19,7 @@ def iou(pred_bin: torch.Tensor, target_bin: torch.Tensor, mask: Optional[torch.T
     inter = (pred_bin & target_bin).sum().float()
     union = (pred_bin | target_bin).sum().float()
     if union == 0:
-        return float("nan")
+        return 0.0   # undefined (no positives in pred or target within mask) -> 0
     return (inter / union).item()
 
 
@@ -49,7 +49,7 @@ def fpr(pred_bin: torch.Tensor, target_bin: torch.Tensor, mask: Optional[torch.T
     tn = (~pred_bin & ~target_bin).sum().float()
     denom = fp + tn
     if denom == 0:
-        return float("nan")
+        return 0.0
     return (fp / denom).item()
 
 

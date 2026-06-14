@@ -301,25 +301,39 @@ def build_manifest_from_records(
     """
     rng = np.random.default_rng(seed)
 
-    # Proper train/val/test split over ALL tiles (train must not be empty).
-    # Prefer tiles that contain HC pixels for val/test so HC-IoU is computable,
-    # but keep the majority for training (using their noisy labels).
-    order = list(records)
-    rng.shuffle(order)
-    n = len(order)
-    n_test = max(1, int(round(n * val_fraction))) if n >= 3 else 0
-    n_val = max(1, int(round(n * val_fraction))) if n >= 3 else 0
+    # Stratified split BY REGION so every split contains both informal (slum) and
+    # formal-dense tiles — otherwise val/test could be all-formal and HC-IoU for the
+    # slum class would be undefined. Within each region, prefer HC-bearing tiles for
+    # val/test (so HC-IoU is computable) and keep the majority for training.
+    test_ids, val_ids = set(), set()
+    by_region: Dict[str, List[Dict]] = {}
+    for r in records:
+        by_region.setdefault(r["region"], []).append(r)
 
-    # Put HC-bearing tiles first so they fall into val/test preferentially.
-    order.sort(key=lambda r: r.get("hc_pixel_count", 0), reverse=True)
-    test_ids = {t["tile_id"] for t in order[:n_test]}
-    val_ids = {t["tile_id"] for t in order[n_test:n_test + n_val]}
+    for region, tiles_r in by_region.items():
+        tiles_r = sorted(tiles_r, key=lambda r: r.get("hc_pixel_count", 0), reverse=True)
+        n = len(tiles_r)
+        if n >= 3:
+            n_test = max(1, int(round(n * val_fraction)))
+            n_val = max(1, int(round(n * val_fraction)))
+        elif n == 2:
+            n_test, n_val = 1, 0
+        else:
+            n_test, n_val = 0, 0   # 1 tile -> train only
+        for t in tiles_r[:n_test]:
+            test_ids.add(t["tile_id"])
+        for t in tiles_r[n_test:n_test + n_val]:
+            val_ids.add(t["tile_id"])
+
+    # Fallback: if val ended up empty, reuse the test split for early stopping.
+    if not val_ids and test_ids:
+        val_ids = set(test_ids)
 
     for r in records:
-        if r["tile_id"] in test_ids:
-            r["split"] = "test"
-        elif r["tile_id"] in val_ids:
+        if r["tile_id"] in val_ids and r["tile_id"] not in test_ids:
             r["split"] = "val"
+        elif r["tile_id"] in test_ids:
+            r["split"] = "test"
         else:
             r["split"] = "train"
 
