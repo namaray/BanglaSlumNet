@@ -186,6 +186,13 @@ class SlumTileDataset(Dataset):
 
     def _load_socioeconomic(self, tile_id: str) -> Tuple[np.ndarray, Affine]:
         path = self.socioeconomic_dir / f"{tile_id}_socioec.tif"
+        # Configs without socioeconomic fusion request zero channels — return an
+        # empty-channel tensor (the model ignores socioec when fusion is off).
+        if not self.socioeconomic_channels:
+            with rasterio.open(path) as src:
+                transform = src.transform
+                h, w = src.height, src.width
+            return np.zeros((0, h, w), dtype=np.float32), transform
         with rasterio.open(path) as src:
             all_bands = {name: idx + 1 for idx, name in enumerate(src.descriptions)}
             indices = []

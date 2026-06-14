@@ -36,15 +36,18 @@ class WeightedBCELoss(nn.Module):
         self.label_smoothing = label_smoothing
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor, mask: Optional[torch.Tensor] = None):
-        p = pred.squeeze(1)
+        # binary_cross_entropy is unsafe under autocast (BF16) — force float32 here.
+        p = pred.squeeze(1).float()
         t = target.float()
         if self.label_smoothing > 0:
             t = t * (1 - self.label_smoothing) + 0.5 * self.label_smoothing
 
         weights = torch.where(target == 1,
                               torch.full_like(t, self.slum_weight),
-                              torch.ones_like(t))
-        loss = F.binary_cross_entropy(p, t, weight=weights, reduction="none")
+                              torch.ones_like(t)).float()
+        p = p.clamp(1e-6, 1 - 1e-6)
+        with torch.autocast(device_type=p.device.type, enabled=False):
+            loss = F.binary_cross_entropy(p, t, weight=weights, reduction="none")
         if mask is not None:
             loss = loss[mask]
         return loss.mean()
