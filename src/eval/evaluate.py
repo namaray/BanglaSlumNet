@@ -67,6 +67,17 @@ def evaluate(
                 all_hc.append(hc_mask.cpu())
             all_regions.extend(batch.get("region", ["unknown"] * rgb.shape[0]))
 
+    if not all_preds:
+        # Empty eval loader (e.g. no HC tiles in the test split). Record zeros so the
+        # matrix completes and the CSV/figures still build, instead of crashing.
+        print(f"[evaluate] WARNING: {run_id} had an EMPTY eval set — recording zero metrics.")
+        zero = {"hc_iou": 0.0, "all_iou": 0.0, "precision": 0.0, "recall": 0.0,
+                "f1": 0.0, "fpr_control": 0.0, "korail_recall": 0.0}
+        ResultsRecorder(results_dir=str(results_dir)).record(
+            run_id=run_id, experiment=config.get("_experiment_id", "unknown"),
+            config=config, metrics=zero, per_region={}, checkpoint=checkpoint_path or "")
+        return zero
+
     all_preds = torch.cat(all_preds)
     all_labels = torch.cat(all_labels)
     hc = torch.cat(all_hc) if all_hc else None
