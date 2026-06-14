@@ -63,6 +63,7 @@ def train_segmenter(
 
     best_val_iou = -1.0
     best_ckpt = None
+    last_ckpt = None
     patience = cfg_tr.get("early_stopping_patience", 10)
     patience_counter = 0
 
@@ -118,30 +119,36 @@ def train_segmenter(
         # Validation
         val_metrics = _evaluate_epoch(model, val_loader, device, amp_dtype)
         val_iou = val_metrics.get("hc_iou", 0.0)
+        import math
+        if val_iou is None or math.isnan(val_iou):
+            val_iou = 0.0
 
         print(f"[Segmenter] Epoch {epoch+1}/{epochs} | loss={train_loss:.4f} "
               f"val_hc_iou={val_iou:.4f}")
+
+        ckpt_payload = {
+            "epoch": epoch, "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
+            "best_val_iou": best_val_iou, "config": config,
+        }
+        # Always keep a 'last' checkpoint so eval has something even if val never improves.
+        last_ckpt = str(output_dir / "last.pt")
+        torch.save(ckpt_payload, last_ckpt)
 
         if val_iou > best_val_iou:
             best_val_iou = val_iou
             patience_counter = 0
             best_ckpt = str(output_dir / "best.pt")
-            torch.save({
-                "epoch": epoch,
-                "model": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
-                "best_val_iou": best_val_iou,
-                "config": config,
-            }, best_ckpt)
+            torch.save(ckpt_payload, best_ckpt)
         else:
             patience_counter += 1
             if patience_counter >= patience:
                 print(f"Early stopping at epoch {epoch+1}")
                 break
 
-    print(f"Training done. Best val HC-IoU: {best_val_iou:.4f} → {best_ckpt}")
-    return best_ckpt
+    final_ckpt = best_ckpt or last_ckpt
+    print(f"Training done. Best val HC-IoU: {best_val_iou:.4f} → {final_ckpt}")
+    return final_ckpt
 
 
 def _evaluate_epoch(model, loader, device, amp_dtype) -> Dict:
