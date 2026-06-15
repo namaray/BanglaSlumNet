@@ -58,6 +58,85 @@ regions:
       lat_max: 23.8095
     notes: "Gulshan-2 + Baridhara; strong nighttime light; clear road grid (~3 km box)"
 
+  # ── Added regions (more unique slum locations to fix class imbalance) ──────────
+  # All ESTIMATE boxes (~3 km) — confirm each on the P1.3 map before exporting.
+  kamrangirchar:
+    type: informal
+    role: train_eval
+    description: "Large dense informal peninsula (SW Dhaka, by the Buriganga)"
+    bbox:
+      lon_min: 90.3500   # ESTIMATE — confirm on P1.3 map
+      lat_min: 23.7015
+      lon_max: 90.3800
+      lat_max: 23.7285
+    notes: "Major distinct informal settlement; geographically separate"
+
+  kallyanpur:
+    type: informal
+    role: train_eval
+    description: "Kallyanpur Pora Bosti (Mirpur) informal settlement"
+    bbox:
+      lon_min: 90.3430   # ESTIMATE — confirm on P1.3 map
+      lat_min: 23.7815
+      lon_max: 90.3730
+      lat_max: 23.8085
+    notes: "Mirpur-area informal settlement"
+
+  hazaribagh:
+    type: informal
+    role: train_eval
+    description: "Hazaribagh tannery-edge informal fabric"
+    bbox:
+      lon_min: 90.3500   # ESTIMATE — confirm on P1.3 map
+      lat_min: 23.7215
+      lon_max: 90.3800
+      lat_max: 23.7485
+    notes: "Dense low-rise informal near the old tannery area"
+
+  tongi:
+    type: informal
+    role: train_eval
+    description: "Tongi northern-periphery informal growth"
+    bbox:
+      lon_min: 90.3870   # ESTIMATE — confirm on P1.3 map
+      lat_min: 23.8765
+      lon_max: 90.4170
+      lat_max: 23.9035
+    notes: "North periphery; industrial-adjacent informal settlement"
+
+  mirpur_beribadh:
+    type: informal
+    role: train_eval
+    description: "Mirpur embankment (Beribadh) informal settlements"
+    bbox:
+      lon_min: 90.3350   # ESTIMATE — confirm on P1.3 map
+      lat_min: 23.8015
+      lon_max: 90.3650
+      lat_max: 23.8285
+    notes: "Embankment-side informal growth, NW Dhaka"
+
+  dhanmondi:
+    type: formal_dense
+    role: train_eval
+    description: "Dhanmondi — planned affluent residential (formal control)"
+    bbox:
+      lon_min: 90.3600   # ESTIMATE — confirm on P1.3 map
+      lat_min: 23.7315
+      lon_max: 90.3900
+      lat_max: 23.7585
+    notes: "Planned residential grid; formal-dense control"
+
+  uttara:
+    type: formal_dense
+    role: train_eval
+    description: "Uttara — planned residential (formal control, north)"
+    bbox:
+      lon_min: 90.3850   # ESTIMATE — confirm on P1.3 map
+      lat_min: 23.8565
+      lon_max: 90.4150
+      lat_max: 23.8835
+    notes: "Planned sectors; formal-dense control"
+
 # Metadata
 metadata:
   crs: EPSG:4326

@@ -45,7 +45,10 @@ def s2_composite(region_geom, year: int, season: str, bands: List[str]):
         mask = (scl.neq(3).And(scl.neq(8)).And(scl.neq(9)).And(scl.neq(10)))
         return img.updateMask(mask).divide(10000).select(bands)
 
-    return col.map(mask_clouds).median().clip(region_geom).toFloat()
+    # unmask(0) gives the composite a full footprint over the whole box, so the export
+    # is NOT cropped to the valid-data rectangle (cloud/water-masked edges otherwise
+    # shrink the GeoTIFF and starve water-adjacent regions of tiles).
+    return col.map(mask_clouds).median().clip(region_geom).unmask(0).toFloat()
 
 
 def run_all(output_dir: str, regions_yaml: str,
