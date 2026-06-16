@@ -37,39 +37,60 @@ except ImportError:  # direct CLI execution
 
 
 def build_weak_labels(regions: dict, reference_year: int, viirs_percentile: float):
-    """Construct the 3-band weak-label image (noisy_label, hc_geo, agreement_score)."""
+    """Construct the 3-band weak-label image (noisy_label, hc_geo, agreement_score).
+
+    Rule: among BUILT residential pixels, classify by VIIRS nighttime brightness —
+    darker = informal (slum), brighter = formal. The dark/bright threshold is computed
+    over BUILT pixels only (not the whole bbox, which rural/water dilutes), so it
+    actually separates the urban core. Slum and formal are assigned mutually
+    exclusively (no overwrite). HC = built pixels in the VIIRS tails (clear cases).
+    """
     city = city_geometry(regions)
 
     ghsl = (ee.Image("JRC/GHSL/P2023A/GHS_BUILT_S/2020")
             .select("built_surface").gt(0).rename("ghsl"))
 
-    # OSM-residential proxy: Dynamic World 'built' class (label 6). TODO_VERIFY.
+    # Built-up / residential: use GHSL OR Dynamic World 'built' (more recall than the
+    # strict intersection, which rarely co-registered at 10 m and gave 0 HC).
     dw = (ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
           .filterDate(f"{reference_year}-01-01", f"{reference_year}-12-31")
           .filterBounds(city).select("label").mode())
-    osm = dw.eq(6).rename("osm")
+    dw_built = dw.eq(6).rename("dw")
+    built = ghsl.Or(dw_built).rename("built")
 
     viirs = (ee.ImageCollection("NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG")
              .filterDate(f"{reference_year}-01-01", f"{reference_year}-12-31")
              .filterBounds(city).select("avg_rad").median().rename("viirs"))
-    city_med = viirs.reduceRegion(
-        reducer=ee.Reducer.percentile([int(viirs_percentile)]),
-        geometry=city, scale=500, maxPixels=int(1e9)
-    ).getNumber("viirs")
-    dark = viirs.lt(city_med).rename("dark")
-    bright = viirs.gte(city_med).rename("bright")
 
-    slum_sig = ghsl.add(osm).add(dark)       # 0–3
-    formal_sig = ghsl.add(osm).add(bright)   # 0–3
+    # Thresholds computed over BUILT pixels only (mask out rural/water dilution),
+    # so dark/bright actually splits the urban fabric. Tails define high confidence.
+    viirs_built = viirs.updateMask(built)
+    pct = viirs_built.reduceRegion(
+        reducer=ee.Reducer.percentile([25, int(viirs_percentile), 75]),
+        geometry=city, scale=500, maxPixels=int(1e9))
+    med = pct.getNumber(f"viirs_p{int(viirs_percentile)}")
+    p25 = pct.getNumber("viirs_p25")
+    p75 = pct.getNumber("viirs_p75")
 
+    dark = viirs.lt(med)
+    bright = viirs.gte(med)
+
+    # Mutually exclusive noisy labels: 0=unknown, 1=slum, 2=formal-dense.
     noisy = (ee.Image(0)
-             .where(slum_sig.gte(2), 1)
-             .where(formal_sig.gte(2), 2)
+             .where(built.And(bright), 2)   # formal first
+             .where(built.And(dark), 1)     # slum last (dark wins on built pixels)
              .rename("noisy_label").toByte())
-    hc_slum = slum_sig.eq(3)
-    hc_formal = formal_sig.eq(3)
+
+    # High-confidence = built AND in a VIIRS tail (unambiguously dark or bright).
+    hc_slum = built.And(viirs.lt(p25))
+    hc_formal = built.And(viirs.gte(p75))
     hc_geo = hc_slum.Or(hc_formal).rename("hc_geo").toByte()
-    agreement = slum_sig.max(formal_sig).rename("agreement").toByte()
+
+    # Agreement score (0-3): built + (dark|bright) + (in a tail) — for the data card.
+    agreement = (built.toByte()
+                 .add(built.And(dark.Or(bright)).toByte())
+                 .add(hc_geo)
+                 .rename("agreement").toByte())
 
     return noisy.addBands(hc_geo).addBands(agreement)
 
