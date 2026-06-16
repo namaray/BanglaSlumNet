@@ -89,12 +89,13 @@ train:
   batch_size: 16               # auto-reduced on OOM
   epochs: 80
   early_stopping_patience: 10
-  early_stopping_metric: hc_iou
+  early_stopping_metric: balanced_accuracy
   mixed_precision: bf16
   label_smoothing: 0.0         # set 0.05 to enable; gated here
-  dice_weight: 0.5
-  bce_weight: 0.5
-  slum_class_weight: 2.0       # up-weight slum class in BCE
+  dice_weight: 0.0             # region-type labels are class-heavy; use balanced BCE for stability
+  bce_weight: 1.0
+  slum_class_weight: 2.0       # used only if auto_class_balance=false
+  auto_class_balance: true     # equalize slum/formal contribution inside the HC/labeled mask
 
 # SAS-Net specific
 train_sasnet:

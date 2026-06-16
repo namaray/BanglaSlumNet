@@ -44,28 +44,28 @@ experiments:
     experiment: exp2_fusion_ablation
     description: "+ nighttime lights (VIIRS)"
     overrides:
-      model.config: vlm_lang
+      model.config: full
       fusion.socioeconomic_channels: [viirs]
 
   - id: exp2_viirs_pop
     experiment: exp2_fusion_ablation
     description: "+ population (WorldPop)"
     overrides:
-      model.config: vlm_lang
+      model.config: full
       fusion.socioeconomic_channels: [viirs, worldpop]
 
   - id: exp2_viirs_pop_roads
     experiment: exp2_fusion_ablation
     description: "+ OSM roads"
     overrides:
-      model.config: vlm_lang
+      model.config: full
       fusion.socioeconomic_channels: [viirs, worldpop, osm_roads]
 
   - id: exp2_viirs_pop_roads_poverty
     experiment: exp2_fusion_ablation
     description: "+ WB poverty"
     overrides:
-      model.config: vlm_lang
+      model.config: full
       fusion.socioeconomic_channels: [viirs, worldpop, osm_roads, wb_poverty]
 
   - id: exp2_full
