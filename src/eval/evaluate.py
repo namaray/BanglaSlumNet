@@ -82,7 +82,17 @@ def evaluate(
     all_labels = torch.cat(all_labels)
     hc = torch.cat(all_hc) if all_hc else None
 
-    global_metrics = compute_metrics(all_preds, all_labels, hc_mask=hc)
+    formal_regions = {"old_dhaka", "gulshan_baridhara", "dhanmondi", "uttara"}
+    region_flags = torch.tensor([r in formal_regions for r in all_regions], dtype=torch.bool)
+    control_mask = region_flags[:, None, None].expand_as(all_labels)
+    if hc is not None:
+        control_mask = control_mask & hc
+    global_metrics = compute_metrics(
+        all_preds,
+        all_labels,
+        hc_mask=hc,
+        control_mask=control_mask,
+    )
 
     # Per-region breakdown
     regions = list(set(all_regions))
@@ -92,7 +102,25 @@ def evaluate(
         p_reg = all_preds[reg_mask]
         l_reg = all_labels[reg_mask]
         hc_reg = hc[reg_mask] if hc is not None else None
-        per_region[reg] = compute_metrics(p_reg, l_reg, hc_mask=hc_reg)
+        control_reg = (l_reg == 2)
+        if hc_reg is not None:
+            control_reg = control_reg & hc_reg
+        per_region[reg] = compute_metrics(
+            p_reg,
+            l_reg,
+            hc_mask=hc_reg,
+            control_mask=control_reg if reg in formal_regions else None,
+            korail_mask=hc_reg if reg == "korail" else None,
+        )
+
+    for reg, key in [
+        ("old_dhaka", "fpr_control_old_dhaka"),
+        ("gulshan_baridhara", "fpr_control_gulshan"),
+    ]:
+        if reg in per_region:
+            global_metrics[key] = per_region[reg].get("fpr_control", float("nan"))
+    if "korail" in per_region:
+        global_metrics["korail_recall"] = per_region["korail"].get("korail_recall", float("nan"))
 
     recorder = ResultsRecorder(results_dir=str(results_dir))
     record = recorder.record(

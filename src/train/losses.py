@@ -30,10 +30,16 @@ class DiceLoss(nn.Module):
 
 
 class WeightedBCELoss(nn.Module):
-    def __init__(self, slum_weight: float = 2.0, label_smoothing: float = 0.0):
+    def __init__(
+        self,
+        slum_weight: float = 2.0,
+        label_smoothing: float = 0.0,
+        auto_balance: bool = True,
+    ):
         super().__init__()
         self.slum_weight = slum_weight
         self.label_smoothing = label_smoothing
+        self.auto_balance = auto_balance
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor, mask: Optional[torch.Tensor] = None):
         # binary_cross_entropy is unsafe under autocast (BF16) — force float32 here.
@@ -42,9 +48,23 @@ class WeightedBCELoss(nn.Module):
         if self.label_smoothing > 0:
             t = t * (1 - self.label_smoothing) + 0.5 * self.label_smoothing
 
-        weights = torch.where(target == 1,
-                              torch.full_like(t, self.slum_weight),
-                              torch.ones_like(t)).float()
+        if self.auto_balance:
+            weight_source = t[mask] if mask is not None else t.reshape(-1)
+            n_pos = weight_source.sum().float()
+            n_total = torch.tensor(float(weight_source.numel()), device=t.device)
+            n_neg = n_total - n_pos
+            if n_pos > 0 and n_neg > 0:
+                # Equal total contribution from slum/formal pixels. This prevents
+                # the region-type labels from rewarding all-slum or all-formal masks.
+                pos_w = 0.5 * n_total / n_pos
+                neg_w = 0.5 * n_total / n_neg
+                weights = torch.where(target == 1, pos_w.expand_as(t), neg_w.expand_as(t)).float()
+            else:
+                weights = torch.ones_like(t).float()
+        else:
+            weights = torch.where(target == 1,
+                                  torch.full_like(t, self.slum_weight),
+                                  torch.ones_like(t)).float()
         p = p.clamp(1e-6, 1 - 1e-6)
         with torch.autocast(device_type=p.device.type, enabled=False):
             loss = F.binary_cross_entropy(p, t, weight=weights, reduction="none")
@@ -60,10 +80,15 @@ class SegmentationLoss(nn.Module):
         bce_weight: float = 0.5,
         slum_weight: float = 2.0,
         label_smoothing: float = 0.0,
+        auto_class_balance: bool = True,
     ):
         super().__init__()
         self.dice = DiceLoss()
-        self.bce = WeightedBCELoss(slum_weight=slum_weight, label_smoothing=label_smoothing)
+        self.bce = WeightedBCELoss(
+            slum_weight=slum_weight,
+            label_smoothing=label_smoothing,
+            auto_balance=auto_class_balance,
+        )
         self.dice_w = dice_weight
         self.bce_w = bce_weight
 

@@ -59,9 +59,11 @@ def train_segmenter(
         bce_weight=cfg_tr.get("bce_weight", 0.5),
         slum_weight=cfg_tr.get("slum_class_weight", 2.0),
         label_smoothing=cfg_tr.get("label_smoothing", 0.0),
+        auto_class_balance=cfg_tr.get("auto_class_balance", True),
     )
 
     best_val_iou = -1.0
+    monitor_metric = cfg_tr.get("early_stopping_metric", "balanced_accuracy")
     best_ckpt = None
     last_ckpt = None
     patience = cfg_tr.get("early_stopping_patience", 10)
@@ -105,7 +107,9 @@ def train_segmenter(
             optimizer.zero_grad()
             with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=(device == "cuda")):
                 pred = model(rgb, cached_feats=cached_feats, socioec=socioec)
-                loss = loss_fn(pred, label)
+                if hc_mask is not None:
+                    hc_mask = hc_mask.to(device)
+                loss = loss_fn(pred, label, mask=hc_mask)
 
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -118,13 +122,15 @@ def train_segmenter(
 
         # Validation
         val_metrics = _evaluate_epoch(model, val_loader, device, amp_dtype)
-        val_iou = val_metrics.get("hc_iou", 0.0)
+        val_iou = val_metrics.get(monitor_metric, val_metrics.get("hc_iou", 0.0))
         import math
         if val_iou is None or math.isnan(val_iou):
             val_iou = 0.0
 
         print(f"[Segmenter] Epoch {epoch+1}/{epochs} | loss={train_loss:.4f} "
-              f"val_hc_iou={val_iou:.4f}")
+              f"val_{monitor_metric}={val_iou:.4f} "
+              f"hc_iou={val_metrics.get('hc_iou', float('nan')):.4f} "
+              f"pred_pos={val_metrics.get('pred_pos_rate', float('nan')):.3f}")
 
         ckpt_payload = {
             "epoch": epoch, "model": model.state_dict(),

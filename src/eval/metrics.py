@@ -40,6 +40,36 @@ def precision_recall_f1(
     return {"precision": precision, "recall": recall, "f1": f1}
 
 
+def confusion_rates(
+    pred_bin: torch.Tensor,
+    target_bin: torch.Tensor,
+    mask: Optional[torch.Tensor] = None,
+) -> Dict[str, float]:
+    """Rates on the evaluated mask, useful for detecting all-positive/all-negative collapse."""
+    if mask is not None:
+        pred_bin = pred_bin[mask]
+        target_bin = target_bin[mask]
+    if pred_bin.numel() == 0:
+        return {
+            "specificity": float("nan"),
+            "balanced_accuracy": float("nan"),
+            "pred_pos_rate": float("nan"),
+            "target_pos_rate": float("nan"),
+        }
+    tp = (pred_bin & target_bin).sum().float()
+    fp = (pred_bin & ~target_bin).sum().float()
+    fn = (~pred_bin & target_bin).sum().float()
+    tn = (~pred_bin & ~target_bin).sum().float()
+    sensitivity = tp / (tp + fn + 1e-8)
+    specificity = tn / (tn + fp + 1e-8)
+    return {
+        "specificity": specificity.item(),
+        "balanced_accuracy": (0.5 * (sensitivity + specificity)).item(),
+        "pred_pos_rate": pred_bin.float().mean().item(),
+        "target_pos_rate": target_bin.float().mean().item(),
+    }
+
+
 def fpr(pred_bin: torch.Tensor, target_bin: torch.Tensor, mask: Optional[torch.Tensor] = None) -> float:
     """False positive rate on a control (non-slum) region."""
     if mask is not None:
@@ -105,8 +135,10 @@ def compute_metrics(
     # Precision, recall, F1 on HC pixels
     if hc_mask is not None:
         prf = precision_recall_f1(pred_bin, slum_label, mask=hc_mask)
+        rates = confusion_rates(pred_bin, slum_label, mask=hc_mask)
     else:
         prf = precision_recall_f1(pred_bin, slum_label, mask=labeled_mask)
+        rates = confusion_rates(pred_bin, slum_label, mask=labeled_mask)
 
     # FPR on formal-dense control regions
     fpr_control = fpr(pred_bin, slum_label, mask=control_mask) if control_mask is not None else float("nan")
@@ -123,6 +155,10 @@ def compute_metrics(
         "precision": prf["precision"],
         "recall": prf["recall"],
         "f1": prf["f1"],
+        "specificity": rates["specificity"],
+        "balanced_accuracy": rates["balanced_accuracy"],
+        "pred_pos_rate": rates["pred_pos_rate"],
+        "target_pos_rate": rates["target_pos_rate"],
         "fpr_control": fpr_control,
         "korail_recall": korail_recall,
     }
