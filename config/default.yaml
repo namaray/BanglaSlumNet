@@ -37,7 +37,10 @@ data:
 # ─── Weak labels ──────────────────────────────────────────────────────────────
 weak_labels:
   viirs_percentile_threshold: 50   # city-median split for dark/bright
-  use_locate_anything_validation: true   # Direction B; set false to skip VLM pass
+  use_locate_anything_validation: false  # Direction B HC-validation OFF for now:
+                                         # LA grounding on 10m S2 is unreliable and zeroed HC.
+                                         # HC comes from the geo tail-rule. Re-enable once LA
+                                         # runs on high-res ESRI tiles (spec §6.2).
 
 # ─── LocateAnything ───────────────────────────────────────────────────────────
 locate_anything:
