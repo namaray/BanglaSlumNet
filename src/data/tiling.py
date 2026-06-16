@@ -107,6 +107,30 @@ def tile_region(
                                 "hc_pixel_count": hc_count, "split": None})
                 continue
 
+            # Fast path: rgb + socioec already exist but the labels were reset.
+            # Regenerate ONLY the 3 label files from the existing tile's grid — this
+            # avoids re-reading the big S2 composite and rewriting rgb/socioec, which
+            # is what made full re-tiling exhaust memory / Drive I/O.
+            if rgb_out.exists() and socioec_out.exists() and labels_path and Path(labels_path).exists():
+                with rasterio.open(str(rgb_out)) as rt:
+                    wt, wcrs, th, tw = rt.transform, rt.crs, rt.height, rt.width
+                lbl = _reproject_onto(labels_path, [1, 2, 3], wt, wcrs, th, Resampling.nearest)
+                noisy = lbl[0].astype(np.uint8)
+                hc_geo = lbl[1].astype(np.uint8)
+                hc_mask = apply_la_validation(noisy, hc_geo, tile_id, la_validation, use_la)
+                prof_u = {"driver": "GTiff", "dtype": "uint8", "count": 1,
+                          "height": th, "width": tw, "crs": wcrs, "transform": wt}
+                with rasterio.open(str(noisy_out), "w", **prof_u) as d:
+                    d.write(noisy[np.newaxis])
+                with rasterio.open(str(hcgeo_out), "w", **prof_u) as d:
+                    d.write(hc_geo[np.newaxis])
+                with rasterio.open(str(hc_out), "w", **prof_u) as d:
+                    d.write(hc_mask[np.newaxis])
+                records.append({"tile_id": tile_id, "region": region,
+                                "hc_pixel_count": int(hc_mask.sum()), "split": None})
+                del lbl, noisy, hc_geo, hc_mask
+                continue
+
             win_transform = s2.window_transform(win)
             rgb = s2.read(list(range(1, n_s2_bands + 1)), window=win,
                           boundless=True, fill_value=0).astype(np.float32)
@@ -294,6 +318,8 @@ def tile_all_regions(
             )
             all_records.extend(recs)
             region_total += len(recs)
+        import gc
+        gc.collect()
         print(f"  {region}: {region_total} tiles from {len(comps)} composites")
 
     manifest_path = build_manifest_from_records(
