@@ -36,77 +36,52 @@ except ImportError:  # direct CLI execution
                                  city_geometry, export_image)
 
 
-def build_weak_labels(regions: dict, reference_year: int, viirs_percentile: float):
-    """Construct the 3-band weak-label image (noisy_label, hc_geo, agreement_score).
-
-    Rule: among BUILT residential pixels, classify by VIIRS nighttime brightness —
-    darker = informal (slum), brighter = formal. The dark/bright threshold is computed
-    over BUILT pixels only (not the whole bbox, which rural/water dilutes), so it
-    actually separates the urban core. Slum and formal are assigned mutually
-    exclusively (no overwrite). HC = built pixels in the VIIRS tails (clear cases).
-    """
+def build_built(regions: dict, reference_year: int):
+    """Built-up / residential mask = GHSL built OR Dynamic World 'built' (class 6).
+    Shared across regions; defines the spatial extent that gets a class label."""
     city = city_geometry(regions)
-
     ghsl = (ee.Image("JRC/GHSL/P2023A/GHS_BUILT_S/2020")
-            .select("built_surface").gt(0).rename("ghsl"))
-
-    # Built-up / residential: use GHSL OR Dynamic World 'built' (more recall than the
-    # strict intersection, which rarely co-registered at 10 m and gave 0 HC).
+            .select("built_surface").gt(0))
     dw = (ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
           .filterDate(f"{reference_year}-01-01", f"{reference_year}-12-31")
           .filterBounds(city).select("label").mode())
-    dw_built = dw.eq(6).rename("dw")
-    built = ghsl.Or(dw_built).rename("built")
+    return ghsl.Or(dw.eq(6)).rename("built")
 
-    viirs = (ee.ImageCollection("NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG")
-             .filterDate(f"{reference_year}-01-01", f"{reference_year}-12-31")
-             .filterBounds(city).select("avg_rad").median().rename("viirs"))
 
-    # Thresholds computed over BUILT pixels only (mask out rural/water dilution),
-    # so dark/bright actually splits the urban fabric. Tails define high confidence.
-    viirs_built = viirs.updateMask(built)
-    pct = viirs_built.reduceRegion(
-        reducer=ee.Reducer.percentile([25, int(viirs_percentile), 75]),
-        geometry=city, scale=500, maxPixels=int(1e9))
-    med = pct.getNumber(f"viirs_p{int(viirs_percentile)}")
-    p25 = pct.getNumber("viirs_p25")
-    p75 = pct.getNumber("viirs_p75")
+def region_label_image(built, cls: int):
+    """3-band weak label for ONE region of a known type.
 
-    dark = viirs.lt(med)
-    bright = viirs.gte(med)
-
-    # Mutually exclusive noisy labels: 0=unknown, 1=slum, 2=formal-dense.
-    noisy = (ee.Image(0)
-             .where(built.And(bright), 2)   # formal first
-             .where(built.And(dark), 1)     # slum last (dark wins on built pixels)
-             .rename("noisy_label").toByte())
-
-    # High-confidence = built AND in a VIIRS tail (unambiguously dark or bright).
-    hc_slum = built.And(viirs.lt(p25))
-    hc_formal = built.And(viirs.gte(p75))
-    hc_geo = hc_slum.Or(hc_formal).rename("hc_geo").toByte()
-
-    # Agreement score (0-3): built + (dark|bright) + (in a tail) — for the data card.
-    agreement = (built.toByte()
-                 .add(built.And(dark.Or(bright)).toByte())
-                 .add(hc_geo)
-                 .rename("agreement").toByte())
-
+    Region-type weak supervision: every BUILT pixel in a known-informal region is
+    labeled slum (1); every built pixel in a known-formal region is labeled
+    formal-dense (2). This is far more reliable than a per-pixel VIIRS threshold
+    (which collapsed to all-formal) and guarantees both classes exist.
+      band1 noisy_label: 0=unknown, cls on built pixels
+      band2 hc_geo     : built pixels are high-confidence for the region's known type
+      band3 agreement  : 0..2 (built + hc), for the data card
+    """
+    noisy = built.multiply(cls).toByte().rename("noisy_label")   # 0 off-built, else cls
+    hc_geo = built.toByte().rename("hc_geo")
+    agreement = built.toByte().add(hc_geo).rename("agreement")
     return noisy.addBands(hc_geo).addBands(agreement)
 
 
 def run_all(output_dir: str, regions_yaml: str, reference_year: int = 2022,
             viirs_percentile: float = 50.0, scale: int = 10,
             skip_existing: bool = True) -> List[str]:
+    # viirs_percentile kept for signature compatibility (no longer used by the
+    # region-type labeling rule).
     regions = load_regions(regions_yaml)
-    img = build_weak_labels(regions, reference_year, viirs_percentile)
+    built = build_built(regions, reference_year)
     written = []
     for region, meta in regions.items():
+        cls = 1 if meta.get("type") == "informal" else 2   # informal->slum, else formal
+        img = region_label_image(built, cls)
         geom = region_geometry(meta["bbox"])
         out = Path(output_dir) / f"weeklabels_{region}.tif"
         written.append(export_image(img, geom, str(out), scale=scale,
                                     skip_existing=skip_existing))
-    print(f"Weak-label export complete: {len(written)} regions.")
+        print(f"  {region}: type={meta.get('type')} -> class {cls}")
+    print(f"Weak-label export complete: {len(written)} regions (region-type labeling).")
     return written
 
 
