@@ -70,6 +70,8 @@ class WeightedBCELoss(nn.Module):
             loss = F.binary_cross_entropy(p, t, weight=weights, reduction="none")
         if mask is not None:
             loss = loss[mask]
+            if loss.numel() == 0:
+                return pred.sum() * 0.0
         return loss.mean()
 
 
@@ -102,6 +104,10 @@ class SegmentationLoss(nn.Module):
         # When mask is provided, use it; otherwise use all non-unknown pixels
         if mask is None:
             mask = target != 0  # exclude unknown
+        elif not mask.any():
+            mask = target != 0
+        if not mask.any():
+            return pred.sum() * 0.0
         slum_target = (target == 1).long()
         return self.dice_w * self.dice(pred, slum_target, mask) + \
                self.bce_w * self.bce(pred, slum_target, mask)
