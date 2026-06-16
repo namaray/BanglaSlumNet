@@ -764,3 +764,29 @@ The team can, in one or two Colab Pro+ sessions:
 5. Open `docs/RESULTS.md`, read the headline table, and start writing the manuscript with real numbers and publication-ready figures already in `results/figures/`.
 
 The paper writes itself from the recorded results: failure-mode reproduction (fig 1), SAS-Net ablation (fig 2), the central socioeconomic+language fusion ablation (fig 3), cross-region generalization (fig 4), the master comparison table, and qualitative overlays (fig 6).  
+
+---
+
+## 17. v4 amendments (2026-06-16 — what actually got built/changed vs the contract above)
+
+These supersede the corresponding parts of §§4–13. See `BanglaSlumNetV4.md` and
+`AGENT_HANDOFF.md` for full detail.
+
+- **Regions:** expanded from 5 to **12** (`config/regions_dhaka.yaml`): 8 informal + 4
+  formal-dense, to get enough unique slum tiles.
+- **Tile size:** 256 → **128 px** (Dhaka neighborhoods are small/adjacent); tile ALL dry-season
+  composites; stratified-by-region split → **720 tiles**.
+- **Weak labels:** the per-pixel OSM∩GHSL∩VIIRS rule (§6.1) **collapsed to 0 slum / all formal**
+  (VIIRS dark/bright threshold never separated the neighborhoods). **Replaced with region-type
+  supervision**: built pixels (GHSL∪DynamicWorld) in informal regions → slum, in formal regions
+  → formal; HC = built pixels. This is the current labeling in `gee/export_weak_labels.py`.
+- **Direction B (LA HC-validation):** **OFF** (`use_locate_anything_validation: false`) — LA on
+  10 m S2 is unreliable and zeroed HC. LA *features* still used. Re-enable with high-res ESRI
+  grounding (future).
+- **Feature mode (D1):** default **`grounding_map`** (prompt-specific 32×32 box-coverage maps;
+  needed for the language ablation). `hidden_state` available for prompt-agnostic visual feats.
+- **GEE export:** runs in-notebook via the Python `ee` API (`gee/export_*.py`); S2 exported
+  full-extent via `unmask`; wet-season composites are empty (monsoon) and fail harmlessly.
+- **Placeholders still to replace:** `osm_roads` (accessibility proxy) and `wb_poverty` (zeros).
+- **Status:** pipeline complete & cached; region-type labels just applied; pending the P4.1b
+  verify gate (slum>0, HC>0) then the Phase-4 run for real numbers.
