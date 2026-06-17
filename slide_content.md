@@ -363,13 +363,45 @@ Create a Dhaka map with 12 bounding boxes:
 
 ---
 
-## Slide 14 - Weak Label Construction
+## Slide 14 - Phase 1: Data Export and Region Benchmark
 
 **Slide content**
 
-The original weak-label idea used a VIIRS dark/bright rule to separate slum and formal pixels. In practice, that rule collapsed to zero slum pixels, making the training labels unusable.
+The first experimental phase was to build a Dhaka benchmark that directly tests the failure mode we care about. We selected both known informal settlements and dense formal control regions, because the model must learn not only where slums are, but also where dense urban fabric is **not** a slum.
 
-We changed the labeling rule to region-type weak supervision:
+The data pipeline exports Sentinel-2 composites, weak-label rasters, and socioeconomic layers from Google Earth Engine. These are then tiled into aligned 128 px samples so the RGB image, label mask, high-confidence mask, and socioeconomic tensor all share the same grid.
+
+**What we did**
+
+| Step | Purpose | Status |
+|---|---|---|
+| Select 12 Dhaka regions | Balance informal and formal dense examples | Done |
+| Export Sentinel-2 dry-season composites | Main optical imagery | Done |
+| Export socioeconomic tensors | VIIRS, population, roads/proxy, poverty/proxy, built-up | Done with caveats |
+| Tile all rasters | Produce aligned model inputs | Done |
+
+**Dataset state**
+
+| Property | Value |
+|---|---:|
+| Regions | 12 |
+| Informal regions | 8 |
+| Formal dense controls | 4 |
+| Total tiles | 720 |
+| Tile size | 128 px |
+| Resolution | Sentinel-2, 10 m |
+
+The key design choice is the formal-control set: Old Dhaka, Gulshan-Baridhara, Dhanmondi, and Uttara are not random negatives. They are intentionally difficult dense areas.
+
+---
+
+## Slide 15 - Phase 2: Weak Labels and Label Verification
+
+**Slide content**
+
+The second phase was weak-label construction. Our first attempted weak-label rule used nighttime brightness to separate slum and formal areas. That rule failed: it produced zero slum pixels, which caused all-zero training metrics.
+
+We fixed this by switching to region-type weak supervision:
 
 | Input | Rule | Output |
 |---|---|---|
@@ -379,7 +411,9 @@ We changed the labeling rule to region-type weak supervision:
 
 Built pixels come from GHSL built-up and Dynamic World built class. The high-confidence mask is the built-up portion of each known region. This is not manual ground truth, but it is a defensible weak-supervision strategy for a region-level benchmark.
 
-**Current verification result**
+Before training, we added a label verification gate. This gate checks that both slum and formal pixels exist, and that all per-tile labels are present.
+
+**Verification result**
 
 | Check | Status |
 |---|---|
@@ -389,26 +423,31 @@ Built pixels come from GHSL built-up and Dynamic World built class. The high-con
 | Formal pixels | 3,923,135 |
 | Gate result | Passed |
 
-**Designer instructions**
+**Interpretation**
 
-Create a label-flow diagram:
-
-`Region type + built-up mask -> noisy label + HC mask`
-
-Show class colors:
-- 0 unknown
-- 1 slum
-- 2 formal
+This means the pipeline no longer has the earlier “zero slum label” bug. However, the labels remain weak: every built pixel in an informal region becomes slum, and every built pixel in a formal region becomes formal. This is enough to test the pipeline, but it is not yet equivalent to manual pixel-level ground truth.
 
 ---
 
-## Slide 15 - Compute-Efficient Colab Pipeline
+## Slide 16 - Phase 3: Feature and SAS-Net Caching
 
 **Slide content**
 
-The pipeline is designed to avoid wasting Colab compute units. The expensive parts are run once and cached on Google Drive. Later experiments train small heads over cached tensors.
+The third phase was feature caching. This is the compute-heavy part of the system, so the codebase is designed to do it once and reuse the results.
 
-**Pipeline phases**
+Two expensive artifacts are cached:
+
+1. **LocateAnything/MoonViT grounding-map features**
+   - Extracted once per tile and prompt.
+   - Stored in `data/features_cache/`.
+   - Reused by all VLM experiment rows.
+
+2. **SAS-Net clean tiles**
+   - SAS-Net was trained to normalize scene appearance.
+   - Clean tile outputs are cached beside the image tiles.
+   - If clean tiles exist, Phase 4 can use them without retraining SAS-Net.
+
+**How the codebase avoids repeated compute**
 
 | Phase | Purpose | Compute cost | Cache behavior |
 |---|---|---|---|
@@ -420,19 +459,23 @@ The pipeline is designed to avoid wasting Colab compute units. The expensive par
 | P4 | Experiment matrix | Moderate GPU | Registry skips completed runs |
 | P5 | Figures and tables | CPU | Regenerates from CSV |
 
-This structure matters because LocateAnything inference is expensive. Feature caching lets us run many ablations without repeatedly calling the VLM.
+This cache-first design matters because the VLM is too expensive to call during every training epoch. In Phase 4, the model trains only small projection, fusion, and decoder heads over cached tensors.
 
 **Designer instructions**
 
-Create a horizontal pipeline with cache icons above P3.1, P3.2, and P4 registry.
+Create a horizontal compute pipeline:
+
+`GEE exports -> tiling -> labels -> VLM feature cache -> SAS-Net cache -> experiment registry -> results`
+
+Add cache icons above VLM features, SAS-Net clean tiles, and registry.
 
 ---
 
-## Slide 16 - Experimental Design and Metrics
+## Slide 17 - Phase 4: Experiments We Intended to Run
 
 **Slide content**
 
-We run three main experiment groups.
+The full experimental plan had three groups. The central group is Experiment 2, because it tests the paper’s main claim: whether language and socioeconomic signals help beyond visual features.
 
 | Experiment | Question | Main comparison |
 |---|---|---|
@@ -440,117 +483,140 @@ We run three main experiment groups.
 | Exp 2: Fusion ablation | Which signal fixes dense-formal confusion? | Visual -> language -> socioeconomic |
 | Exp 3: Leave-one-region-out | Does the model generalize across Dhaka regions? | Hold out one region at a time |
 
-**Main metrics**
+**Experiment 2 matrix**
+
+| Row | Meaning |
+|---|---|
+| `exp2_visual_only` | VLM visual features with neutral prompt |
+| `exp2_vlm_lang` | Add slum/formal language prompts |
+| `exp2_viirs_only` | Add nighttime lights |
+| `exp2_viirs_pop` | Add VIIRS + population |
+| `exp2_viirs_pop_roads` | Add road/access proxy |
+| `exp2_viirs_pop_roads_poverty` | Add poverty proxy |
+| `exp2_full` | Full language + socioeconomic model |
+| `exp2_baseline_cnn` | Optical-only CNN baseline |
+
+**Metrics we track**
 
 | Metric | What it measures |
 |---|---|
 | HC-IoU | Primary segmentation score on high-confidence pixels |
-| All-IoU | Broader score over all labeled pixels |
-| Precision/Recall/F1 | Classification balance |
+| Balanced accuracy | Whether both slum and formal classes are handled |
+| Predicted-positive rate | Whether the model collapses to all-slum or all-formal |
 | FPR on formal controls | Whether dense formal areas are falsely predicted as slum |
-| Korail recall | Whether the model still detects a known major slum |
+| Precision/Recall/F1 | Segmentation classification balance |
 
-The central result will come from Experiment 2. The strongest evidence would be a full model that improves HC-IoU while reducing false positives in formal dense controls.
+We stopped focusing on raw HC-IoU alone because it initially rewarded trivial predictions. A model that predicts slum everywhere can appear to perform well when slum pixels dominate the weak labels. Balanced accuracy and predicted-positive rate are therefore essential diagnostics.
 
 ---
 
 # Speaker 5: Findings, Discussion, and Next Steps
 
-## Slide 17 - Verified Data State Before Training
+## Slide 18 - What Happened in the First Phase 4 Run
 
 **Slide content**
 
-Before Phase 4 training, we ran a label verification gate to ensure the dataset is not degenerate. This was necessary because an earlier label rule produced all-zero slum metrics.
+The first Phase 4 result looked promising at first because several visual-only runs produced HC-IoU around 0.66. After analyzing the result files, we found that this number was misleading.
 
-**Verification output**
+The model had collapsed into simple class-prior behavior:
 
-| Quantity | Value |
-|---|---:|
-| Total tiles | 720 |
-| Total HC pixels | 11,308,540 |
-| Unknown pixels | 490,390 |
-| Slum pixels | 7,382,955 |
-| Formal pixels | 3,923,135 |
+| Observed result | What it meant |
+|---|---|
+| `recall = 1.0` and `precision ≈ 0.66` | Model was predicting slum almost everywhere |
+| Several rows had all metrics `0.0` | Other configs collapsed to predicting no slum |
+| Formal-control FPR was `nan` | Evaluation was not yet constructing control masks |
+| Socioeconomic ablation rows were misconfigured | Some rows were not actually using fusion |
 
-**Interpretation**
+This is why we stopped treating the first result table as final. It was not a true model finding; it was a debugging signal. The pipeline was running, but the training objective and evaluation diagnostics were not yet strong enough to prevent trivial solutions.
 
-The dataset now contains both target classes. Informal regions contain slum-labeled built pixels, and formal control regions contain formal-labeled built pixels. This means Phase 4 training is safe to run, and all-zero metrics should no longer be caused by missing slum labels.
+**Fixes we made**
+
+| Issue | Fix |
+|---|---|
+| HC-IoU rewarded all-slum masks | Added balanced accuracy monitoring |
+| Loss encouraged class-prior behavior | Switched to balanced BCE on HC pixels |
+| No collapse diagnostics | Added `pred_pos_rate` and `target_pos_rate` |
+| FPR fields were missing | Added formal-control masks in evaluation |
+| Socioeconomic rows did not activate fusion | Corrected experiment config to use `full` |
 
 ---
 
-## Slide 18 - Main Findings Placeholder
+## Slide 19 - Where We Stopped and Why
 
 **Slide content**
 
-This slide will be completed after Colab Phase 4 and Phase 5 finish.
+This is the screenshot we will show as our current stopping point. It shows the corrected Phase 4 run after the debugging fixes.
 
-**Insert final Experiment 2 results here**
+**What the screenshot shows**
 
-| Model | HC-IoU | All-IoU | Precision | Recall | FPR on formal controls |
-|---|---:|---:|---:|---:|---:|
-| `baseline_cnn` | TBD | TBD | TBD | TBD | TBD |
-| `vlm_visual` | TBD | TBD | TBD | TBD | TBD |
-| `vlm_lang` | TBD | TBD | TBD | TBD | TBD |
-| `full` | TBD | TBD | TBD | TBD | TBD |
+| Evidence in screenshot | Interpretation |
+|---|---|
+| `exp2_visual_only` completed | Central ablation started successfully |
+| `val_balanced_accuracy ≈ 0.50` | Visual-only features are weak, close to random balance |
+| `pred_pos` is no longer 0 or 1 | The collapse diagnostic is working |
+| `HC-IoU = 0.4647` after visual-only | More realistic than the earlier fake 0.66 |
+| `exp2_vlm_lang` began | Next test is whether language helps |
 
-**Expected analysis to write after results**
+**Why we stopped here**
 
-- Compare optical-only baseline against VLM-based variants.
-- Check whether language grounding improves over neutral VLM features.
-- Check whether socioeconomic fusion reduces false positives in Old Dhaka, Gulshan-Baridhara, Dhanmondi, and Uttara.
-- Identify the best-performing model and report the headline metric.
+We stopped because the early visual-only result showed the system was now behaving honestly: it was no longer hiding collapse behind a misleading metric, but it also was not yet producing strong discrimination. At this point, continuing blindly would spend compute without guaranteeing scientifically useful numbers.
+
+The right interpretation is:
+
+**The codebase is now in a better debugging state, but the current data and supervision may be too weak for strong per-pixel segmentation claims.**
 
 **Designer instructions**
 
-Reserve space for two charts:
-1. Bar chart: model variant vs. HC-IoU.
-2. Line or step chart: visual-only -> language -> VIIRS -> population -> roads -> poverty -> full, with HC-IoU and FPR-control.
+Use the provided Colab screenshot as the main visual.
+
+Add three callouts on the screenshot:
+- "Balanced accuracy added"
+- "Predicted-positive rate detects collapse"
+- "Visual-only result is weak but honest"
 
 ---
 
-## Slide 19 - Limitations and Scientific Caveats
+## Slide 20 - How the Codebase Works and What Needs to Change
 
 **Slide content**
 
-The method is promising, but the limitations must be stated clearly.
+The codebase is organized to make the experiment reproducible and compute-efficient. Code is cloned fresh into Colab, while data, model cache, features, and results persist on Google Drive.
 
-| Limitation | Why it matters | How we address or disclose it |
-|---|---|---|
-| Weak labels are region-type labels | They are not manual pixel-level ground truth | Report as weak supervision, not definitive annotation |
-| 10 m Sentinel-2 is coarse | Small lanes and roofs are hard to see | Use VLM features cautiously; future high-res grounding |
-| Roads and poverty layers include placeholders/proxies | Some ablation rows may not be fully meaningful | Replace assets before final paper claims |
-| Some regions are close geographically | Leave-one-region-out may contain leakage | Discuss and consider spatial-block split |
-| Wet-season composites failed | Seasonal robustness is limited | Report dry-season scope |
+**Codebase structure**
 
-The honest framing is that BanglaSlumNet is a Dhaka weak-supervision benchmark and method prototype, not a finished national mapping system.
-
----
-
-## Slide 20 - Conclusion and Next Steps
-
-**Slide content**
-
-BanglaSlumNet addresses a specific failure mode in slum detection: optical-only models confuse dense formal neighborhoods with informal settlements in Dhaka.
-
-The proposed solution combines:
-
-| Component | Contribution |
+| Folder | Role |
 |---|---|
-| Sentinel-2 imagery | Visual structure |
-| LocateAnything language grounding | Concept-level slum/formal distinction |
-| Socioeconomic context | Non-visual evidence for service access and settlement condition |
-| Cross-attention fusion | Learns how context should modulate visual interpretation |
-| Weak-label benchmark | Tests both informal regions and formal dense controls |
+| `gee/` | Earth Engine exporters for S2, weak labels, socioeconomic layers |
+| `src/data/` | Tiling, labels, dataset loading, preflight validation |
+| `src/locate_anything/` | LocateAnything worker, prompts, feature extraction |
+| `src/models/` | SAS-Net, fusion module, decoder, baselines |
+| `src/train/` | SAS-Net and segmentation training loops |
+| `src/eval/` | Metrics and evaluation |
+| `src/tracking/` | Registry and result recorder |
+| `notebooks/` | Colab orchestration phases |
 
-**Immediate next steps**
+**What works now**
 
-1. Complete Phase 4 experiment matrix.
-2. Run Phase 5 to generate figures, tables, and `RESULTS.md`.
-3. Insert real numbers into Slide 18.
-4. Replace placeholder roads/poverty layers before strong ablation claims.
-5. Write the manuscript results and limitations sections from recorded outputs only.
+| Component | Status |
+|---|---|
+| GEE export and tiling | Working |
+| Label verification gate | Working |
+| Feature caching | Working |
+| SAS-Net training/cache | Working |
+| Registry resume logic | Working |
+| Collapse diagnostics | Added and working |
 
-**Closing message**
+**What needs to change next**
 
-The core idea is simple: in dense megacities, slum mapping should not rely on optical density alone. It needs semantic and socioeconomic context.
+| Needed change | Why it matters |
+|---|---|
+| Create a small manual evaluation subset | Weak region labels are not enough for strong segmentation claims |
+| Consider tile-level classification | Current labels are region-level, so tile-level framing may be more scientifically honest |
+| Replace roads and poverty placeholders | Current socioeconomic ablations are not fully trustworthy |
+| Use high-resolution imagery for VLM grounding | LocateAnything is likely too coarse on 10 m Sentinel-2 |
+| Implement true LORO and true SAS-Net ablation orchestration | Current generic loop only supports the central Exp 2 matrix safely |
 
+**Closing statement**
+
+---
+Our current conclusion is not "the model is finished." It is more precise: **we built an end-to-end, cache-aware experimental pipeline; identified and fixed label and metric collapse bugs; and learned that stronger supervision or a tile-level framing is needed before making strong segmentation claims.**
