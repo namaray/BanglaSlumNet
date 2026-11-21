@@ -67,6 +67,18 @@ benchmark:
   tables_dir: results/tables
   runs_dir: results/runs/benchmark
 
+# ─── E5: slum maps and 2017 -> 2023 change (§6) ───────────────────────────────
+maps:
+  features: all             # feature set from benchmark.feature_sets
+  maps_dir: results/maps
+  # Change needs a confident switch: below change_low in one year and at or above change_high in
+  # the other. A plain 0.5 cut flags ~76% of stable slum as changed, mostly year-to-year noise
+  # (Open Buildings suggests ~3% real change).
+  change_low: 0.1
+  change_high: 0.9
+  spotcheck_per_class: 20   # cells sampled per change class for the visual spot-check
+  spotcheck_seed: 1337
+
 # ─── E4: cost of region-box weak labels (§6) ──────────────────────────────────
 weak_label_cost:
   year: 2017
