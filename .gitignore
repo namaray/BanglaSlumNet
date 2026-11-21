@@ -8,6 +8,8 @@ data/tiles/
 data/labels/
 data/socioeconomic/
 data/features_cache/
+data/raw/
+data/derived/
 *.npy
 *.tif
 *.tiff

@@ -1,0 +1,48 @@
+# BanglaSlumNet open-data benchmark — grid, labels, splits, features (docs/MASTER_PLAN.md §4–§6).
+# All benchmark scripts read this file; never hardcode these values in source code.
+
+paths:
+  esa_shp: data/raw/external_boundaries/esa_eo4sd_urban/EO4SD_DHAKA_INFORMAL_2017.shp
+  mapped_area: data/derived/esa_mapped_area.geojson   # scripts/build_mapped_area.py
+  derived_dir: data/derived
+
+ee_project: banglaslumnet-research
+
+# ─── Grid ─────────────────────────────────────────────────────────────────────
+grid:
+  crs: EPSG:32646      # UTM 46N, ESA's native CRS
+  cell_m: 100          # benchmark unit (one cell = 10 × 10 Sentinel-2 pixels)
+  pixel_m: 10          # sub-grid used to rasterize polygons
+  pad_m: 1000          # margin around the mapped area (context for later CNN windows)
+
+# ─── Labels (§5.2) ────────────────────────────────────────────────────────────
+labels:
+  slum_min_frac: 0.5        # cell is slum if ESA slum share >= this
+  nonslum_max_frac: 0.0     # cell is non-slum only if ESA slum share <= this
+  nonslum_clearance_m: 20   # non-slum cells must be at least this far from any ESA polygon (misalignment guard)
+  mapped_inner_buffer_m: 100  # only cells fully inside the mapped area, shrunk by this, get labels
+  # Both classes must be built-up. Open Buildings presence keeps 98% of ESA slum cells in 2017;
+  # Dynamic World (dw_built_frac >= 0.5) keeps only 75%, so it is not used for the mask.
+  built_band: ob_presence
+  built_min: 0.15
+  # Years after the reference year (§4.2): mask change since 2017 using Open Buildings
+  change_height_m: 3.0      # slum cell ignored if mean building height rose by >= this
+  change_presence_ratio: 0.5  # slum cell ignored if building presence fell to <= this × 2017
+  new_presence_rise: 0.2    # non-slum cell ignored if building presence rose by >= this (possible new slum)
+
+reference_year: 2017
+years: [2017, 2023]
+season: dry                 # gee/ee_export_utils.season_dates: Dec (prev year) – Feb
+
+# ─── Spatial cross-validation (§5.3) ──────────────────────────────────────────
+splits:
+  block_m: 2000             # cells are grouped into blocks; folds never split a block
+  n_folds: 5
+  seed: 1337
+
+# ─── Features exported from Earth Engine per 100 m cell (§5.5) ────────────────
+features:
+  s2_bands: [B2, B3, B4, B8, B11, B12]
+  s2_indices: [NDVI, NDBI, NDWI]
+  s2_max_cloud_pct: 60      # scene filter before per-pixel cloud masking
+  ob_scale_m: 4             # Open Buildings 2.5D Temporal effective resolution
