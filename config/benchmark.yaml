@@ -40,6 +40,33 @@ splits:
   n_folds: 5
   seed: 1337
 
+# ─── Hard-negative strata (§5.4) ──────────────────────────────────────────────
+strata:
+  # "dense": non-slum cells at least as built-up (ob_presence) as this quantile of
+  # reference-year slum cells, i.e. formal areas as dense as a typical slum
+  dense_slum_quantile: 0.25
+  # "formal_districts": non-slum cells inside these named boxes of config/regions_dhaka.yaml
+  regions_yaml: config/regions_dhaka.yaml
+  formal_districts: [old_dhaka, gulshan_baridhara, dhanmondi, uttara]
+
+# ─── Cell benchmark runs (E2/E3) ──────────────────────────────────────────────
+benchmark:
+  threshold: 0.5            # models use balanced class weights, so 0.5 is the natural cut
+  feature_sets:             # E3 ablation: prefixes of the exported bands
+    s2: [s2_]
+    s2_ob: [s2_, ob_]
+    all: [s2_, ob_, dw_, ctx_]
+  runs:                     # [train_year, test_year]; test fold always unseen in training
+    - [2017, 2017]
+    - [2023, 2023]
+    - [2017, 2023]
+  gbm:
+    max_iter: 300
+    learning_rate: 0.05
+    seed: 0
+  tables_dir: results/tables
+  runs_dir: results/runs/benchmark
+
 # ─── Features exported from Earth Engine per 100 m cell (§5.5) ────────────────
 features:
   s2_bands: [B2, B3, B4, B8, B11, B12]
