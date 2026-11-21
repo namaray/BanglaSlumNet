@@ -54,6 +54,13 @@ def dense_threshold(cfg):
     return float(ref.loc[ref.label == LABEL_SLUM, "ob_presence"].quantile(q))
 
 
+def lookalike_height_max(cfg):
+    """Mean building height of a tall-ish (high-quantile) slum cell in the reference year."""
+    ref = load_cells(cfg, cfg["reference_year"])
+    q = cfg["strata"]["lookalike_height_slum_quantile"]
+    return float(ref.loc[ref.label == LABEL_SLUM, "ob_height_mean"].quantile(q))
+
+
 def feature_columns(df, prefixes):
     return [c for c in df.columns if any(c.startswith(p) for p in prefixes)]
 
@@ -61,9 +68,10 @@ def feature_columns(df, prefixes):
 def run(config):
     cfg = load_benchmark_config(config)
     b = cfg["benchmark"]
-    dense_min = dense_threshold(cfg)
+    dense_min, height_max = dense_threshold(cfg), lookalike_height_max(cfg)
     print(f"  dense-formal stratum: non-slum cells with ob_presence >= {dense_min:.3f} "
-          f"(the {cfg['strata']['dense_slum_quantile']:.0%} quantile of {cfg['reference_year']} slum cells)")
+          f"(the {cfg['strata']['dense_slum_quantile']:.0%} quantile of {cfg['reference_year']} slum cells); "
+          f"look-alike: dense and ob_height_mean <= {height_max:.2f} m")
     cells = {y: load_cells(cfg, y) for y in {y for run in b["runs"] for y in run}}
     os.makedirs(b["tables_dir"], exist_ok=True)
     os.makedirs(b["runs_dir"], exist_ok=True)
@@ -73,6 +81,7 @@ def run(config):
         train_all = cells[train_year][cells[train_year].label != LABEL_IGNORE]
         test_all = cells[test_year][cells[test_year].label != LABEL_IGNORE].copy()
         test_all["dense"] = test_all.ob_presence >= dense_min
+        test_all["lookalike"] = test_all.dense & (test_all.ob_height_mean <= height_max)
         test_all["formal_district"] = formal_district_mask(test_all, cfg)
         for fset, prefixes in b["feature_sets"].items():
             cols = feature_columns(train_all, prefixes)
@@ -87,32 +96,36 @@ def run(config):
                 oof[te.index] = p
                 m = binary_metrics(te.label, p, b["threshold"])
                 dense = stratum_fpr(te.label, p, te.dense, b["threshold"])
+                look = stratum_fpr(te.label, p, te.lookalike, b["threshold"])
                 formal = stratum_fpr(te.label, p, te.formal_district, b["threshold"])
                 rows.append({"train_year": train_year, "test_year": test_year, "features": fset, "fold": int(f),
                              **m, "fpr_dense": dense["fpr"], "n_dense": dense["n"],
+                             "fpr_lookalike": look["fpr"], "n_lookalike": look["n"],
                              "fpr_formal_districts": formal["fpr"], "n_formal_districts": formal["n"]})
-            out = test_all[["row", "col", "fold", "label", "slum_frac", "dense", "formal_district"]].assign(prob=oof)
+            out = test_all[["row", "col", "fold", "label", "slum_frac", "dense", "lookalike",
+                            "formal_district"]].assign(prob=oof)
             out.to_csv(os.path.join(b["runs_dir"], f"oof_{train_year}_{test_year}_{fset}.csv"), index=False)
 
     folds = pd.DataFrame(rows)
     folds.to_csv(os.path.join(b["tables_dir"], "benchmark_folds.csv"), index=False)
     keys = ["train_year", "test_year", "features"]
     metric_cols = ["auc", "balanced_acc", "precision", "recall", "f1", "iou", "fpr", "fpr_dense",
-                   "fpr_formal_districts", "pred_pos_rate"]
+                   "fpr_lookalike", "fpr_formal_districts", "pred_pos_rate"]
     summary = folds.groupby(keys, sort=False)[metric_cols].agg(["mean", "std"])
     summary.columns = [f"{m}_{s}" for m, s in summary.columns]
-    counts = folds.groupby(keys, sort=False)[["n_slum", "n_nonslum", "n_dense", "n_formal_districts"]].sum()
+    counts = folds.groupby(keys, sort=False)[["n_slum", "n_nonslum", "n_dense", "n_lookalike",
+                                              "n_formal_districts"]].sum()
     summary = summary.join(counts).reset_index()
     summary.to_csv(os.path.join(b["tables_dir"], "benchmark_summary.csv"), index=False)
 
-    show = ["auc", "balanced_acc", "recall", "fpr", "fpr_dense", "fpr_formal_districts"]
+    show = ["auc", "balanced_acc", "recall", "fpr", "fpr_dense", "fpr_lookalike"]
     print(f"\n  {'train→test':10s} {'features':8s} " + " ".join(f"{c:>17s}" for c in show))
     for r in summary.itertuples():
         vals = " ".join(f"{getattr(r, c + '_mean'):8.3f} ± {getattr(r, c + '_std'):5.3f}" for c in show)
         print(f"  {r.train_year}→{r.test_year}  {r.features:8s} {vals}")
     print(f"\n  cells tested per run: slum {summary.n_slum.iloc[0]:,}, non-slum {summary.n_nonslum.iloc[0]:,}, "
-          f"dense-formal {summary.n_dense.iloc[0]:,}, formal-district {summary.n_formal_districts.iloc[0]:,} "
-          f"(first run)")
+          f"dense-formal {summary.n_dense.iloc[0]:,}, look-alike {summary.n_lookalike.iloc[0]:,}, "
+          f"formal-district {summary.n_formal_districts.iloc[0]:,} (first run)")
     print(f"  [done] {b['tables_dir']}/benchmark_summary.csv, benchmark_folds.csv; predictions in {b['runs_dir']}/")
 
 

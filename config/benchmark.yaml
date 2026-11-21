@@ -45,6 +45,11 @@ strata:
   # "dense": non-slum cells at least as built-up (ob_presence) as this quantile of
   # reference-year slum cells, i.e. formal areas as dense as a typical slum
   dense_slum_quantile: 0.25
+  # "lookalike": dense AND low-rise, i.e. mean building height <= this quantile of slum cells.
+  # Denser formal areas are usually taller and easy; the dense low-rise ones are the real
+  # look-alikes (2017: ~40% false positives vs ~5% for dense taller cells). Note the stratum is
+  # defined by the same Open Buildings bands the model uses, so it marks where open data runs out.
+  lookalike_height_slum_quantile: 0.75
   # "formal_districts": non-slum cells inside these named boxes of config/regions_dhaka.yaml
   regions_yaml: config/regions_dhaka.yaml
   formal_districts: [old_dhaka, gulshan_baridhara, dhanmondi, uttara]
