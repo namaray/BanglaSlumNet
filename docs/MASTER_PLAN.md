@@ -1,6 +1,6 @@
 # BanglaSlumNet — Master Plan
 
-Last updated: 2026-10-05
+Last updated: 2026-11-22. The benchmark is built and E0, E2–E5 are done; see [§3.5](#35-benchmark-results-2026-11-22). Only E1 (GRAM with adaptation, needs a Colab GPU) remains.
 
 This is the single source of truth for what BanglaSlumNet is, what we found, what the paper claims, and what we do next. It **supersedes the direction** set in `PROJECT_RECOVERY_PLAN.md`, `SPEC.md`, `SUPERVISOR_BRIEF.md`, and `NEXT_SESSION.md`. Those files stay in the repo as history (see [§13](#13-status-of-older-documents)).
 
@@ -20,6 +20,10 @@ This is the single source of truth for what BanglaSlumNet is, what we found, wha
   4. **A 2017–2023 slum change map of Dhaka.**
 - **No manual annotation** is needed. A light spot-check of test areas for changes since 2017 is recommended.
 - **Everything uses free data** in Google Earth Engine + Colab.
+- **Results so far (2017, gradient boosting, spatial cross-validation; details in §3.5):**
+  - Sentinel-2 alone: AUC 0.85. Adding Open Buildings: 0.95.
+  - Region-box weak labels: AUC 0.61 on the same test, against 0.94 with ESA labels on the same cells.
+  - The hard cases are **dense, low-rise formal areas** (Old Dhaka-like): about 37% are mistaken for slums, against 8% of non-slum cells overall.
 
 ---
 
@@ -47,10 +51,10 @@ Dhaka is missing from every recent slum-mapping benchmark, and the state-of-the-
 
 | # | Contribution | Type | Status |
 |---|---|---|---|
-| C1 | Dhaka benchmark: year-matched labels and imagery, dense-formal hard negatives, spatially blocked splits, released as scripts and derived labels | Dataset / benchmark | Planned |
-| C2 | Transfer-failure analysis of GRAM on Dhaka | Empirical finding | Preliminary result exists ([§3.3](#33-gram-fails-on-dhaka-preliminary)) |
-| C3 | Measured cost of region-box weak supervision | Empirical finding | Label audit done ([§3.1](#31-region-box-labels-are-mostly-wrong)); training comparison planned |
-| C4 | Annual open-data slum map of Dhaka, 2017–2023 | Applied science | Planned |
+| C1 | Dhaka benchmark: year-matched labels and imagery, dense-formal hard negatives, spatially blocked splits, released as scripts and derived labels | Dataset / benchmark | **Built** (2017, 2023); release pending |
+| C2 | Transfer-failure analysis of GRAM on Dhaka | Empirical finding | Preliminary, zero-shot only ([§3.3](#33-gram-fails-on-dhaka-preliminary)); E1 needs a GPU |
+| C3 | Measured cost of region-box weak supervision | Empirical finding | **Done** (E4, §3.5) |
+| C4 | Open-data slum map of Dhaka, 2017 and 2023, with confident change | Applied science | **Done** for 2017/2023 (E5); spot-check pending; 2018–2022 optional |
 
 ### 1.5 What the paper does **not** claim
 
@@ -134,17 +138,21 @@ All 12 boxes are also still marked `ESTIMATE` / `TODO_VERIFY` in `config/regions
 
 ### 3.3 GRAM fails on Dhaka (preliminary)
 
-GRAM's 27 saved probability maps from the May run (`gram-zero-shot` branch), scored against ESA polygons. A pixel counts as predicted slum at probability > 0.5.
+GRAM's 27 saved probability maps from the May run (`gram-zero-shot` branch, restored to `data/raw/gram_zero_shot_z16/`), scored with `scripts/score_gram.py` against ESA polygons, **inside the ESA mapped area only**. A pixel counts as predicted slum at probability ≥ 0.5.
 
 | Location | ESA slum % | GRAM predicted slum % | Precision | Recall | IoU | AUC |
 |---|---:|---:|---:|---:|---:|---:|
-| Korail | 16.6% | 51.8% | 11.3% | 35.5% | 9.4% | **0.42** |
+| Korail | 20.2% | 54.5% | 13.1% | 35.5% | 10.6% | **0.39** |
 | Mirpur | 4.2% | 59.0% | 2.2% | 30.4% | 2.1% | **0.32** |
-| Old Dhaka | 18.9% | 45.9% | 31.0% | 75.3% | 28.1% | 0.74 |
-| **All** | 13.2% | 52.2% | 13.6% | 53.9% | 12.2% | **0.54** |
+| Old Dhaka | 28.7% | 64.6% | 35.1% | 78.8% | 32.0% | 0.62 |
+| **All** | 15.7% | 58.9% | 14.5% | 54.4% | 12.9% | **0.49** |
 
-- **Korail and Mirpur score worse than chance.** GRAM assigns slum pixels *lower* probability than the surrounding formal areas. The Korail tile that is 41% slum gets the lowest mean probability of the nine (0.27).
-- **Correction to `FINDINGS.md`:** it claimed GRAM blanket-flags *formal* Old Dhaka as slum. Those tiles are about 19% ESA slum (riverside settlements), and GRAM ranks them reasonably (AUC 0.74). Do not use Old Dhaka as the GRAM failure example.
+The October 2026 version of this table (AUC 0.42 / 0.32 / 0.74 / 0.54, ESA slum 13.2%) also counted pixels outside the mapped area as non-slum. The submitted abstract's "13%" comes from that version; the paper should use the numbers above.
+
+**On the same 346 labelled 100 m cells** (81 slum), GRAM zero-shot scores AUC 0.38 and our model 0.98, with false-positive rates of 68% and 7.5% (`results/tables/gram_z16_zeroshot_cells.csv`).
+
+- **Korail and Mirpur score worse than chance.** GRAM assigns slum pixels *lower* probability than the surrounding formal areas.
+- **Correction to `FINDINGS.md`:** it claimed GRAM blanket-flags *formal* Old Dhaka as slum. Those tiles contain riverside settlements (29% ESA slum inside the mapped area), and GRAM ranks them above chance (AUC 0.62). Do not use Old Dhaka as the GRAM failure example.
 - **Why this is preliminary:**
   1. Only GRAM's first phase was run. Its main idea is a second, test-time adaptation phase that adapts to a new city using its own pseudo-labels (`main_moe_pl_v3.py`); that was never run.
   2. The tiles were zoom-16 Esri imagery at **2.19 m/px**. `FINDINGS.md` wrongly says ~1.2 m/px. GRAM was trained on finer imagery.
@@ -156,6 +164,58 @@ GRAM's 27 saved probability maps from the May run (`gram-zero-shot` branch), sco
 
 - At Sentinel-2's 10 m, the median ESA slum polygon is about **55 pixels**. Polygons under 100 px make up 71% of the count but only 20% of slum area. Neighbourhood-scale mapping is feasible; building-level outlines are not.
 - LocateAnything was trained on high-resolution photos. A 128 px tile at 10 m covers 1.28 km, far outside its training distribution. The v4 code already disabled LocateAnything label validation "until high-res grounding."
+
+### 3.5 Benchmark results (2026-11-22)
+
+All numbers come from gradient boosting on the 100 m cells, 5-fold spatial cross-validation (2 km blocks), mean over folds. Tables are in `results/tables/` and figures in `results/figures/benchmark/` (both git-ignored; regenerate with the scripts in [§8.1](#81-new)).
+
+**Benchmark size.** The mapped area is 303.0 km² (ESA: 305.8 km²). The 2017 labels are 1,730 slum and 6,733 non-slum cells. Slum cells capture 57% of ESA's slum area; small pockets and mixed cells are ignored by design.
+
+**E2/E3: main result and feature ablation (2017).** "Dense" = non-slum cells as built-up as a typical slum (3,496 cells). "Look-alike" = dense and low-rise (484 cells).
+
+| Inputs | AUC | Recall | FPR, all non-slum | FPR, dense | FPR, look-alike |
+|---|---:|---:|---:|---:|---:|
+| Sentinel-2 | 0.848 | 0.645 | 0.138 | 0.168 | 0.471 |
+| + Open Buildings | 0.947 | 0.806 | 0.091 | 0.114 | 0.441 |
+| + Dynamic World, VIIRS, WorldPop | 0.954 | 0.826 | 0.081 | 0.098 | 0.370 |
+
+- **Open Buildings is the main gain.** It lifts AUC from 0.85 to 0.95 and recall from 65% to 81%, and cuts dense-formal false positives by a third. Context layers add little on top.
+- **Dense formal areas are not the problem; dense low-rise ones are.** Denser formal areas are usually taller and easy (dense and taller: about 5% FPR). Dense low-rise ones are mistaken for slums 37–47% of the time.
+- **Named districts tell the same story.** FPR without → with Open Buildings:
+  - Gulshan/Baridhara: 4.7% → 1.9%
+  - Dhanmondi: 10.4% → 3.1%
+  - Uttara: 5.0% → 2.1%
+  - **Old Dhaka: 5.2% → 7.8%.** Building data does not help there; it is only 193 cells, so this is suggestive.
+- **Caveat:** the look-alike stratum is defined from the same Open Buildings bands the model uses. It marks where open data stops separating the classes. Some of these false positives may be slums ESA missed; the spot-check should cover them.
+
+**Recall breakdowns (2017, all features).**
+- By slum type: high density 86%, low density 70%. Sentinel-2 alone finds only 38% of low-density slums.
+- By polygon size: > 10 ha 88%, 1–10 ha 79%, < 1 ha 64%.
+
+**Sensitivity.**
+- Slum-share threshold 0.3 / 0.5 / 0.7: AUC 0.93 / 0.95 / 0.97 with all features. The ranking of feature sets never changes.
+- Stricter density cuts for the dense stratum *lower* its FPR (25th / 50th / 75th percentile: 9.3% / 8.0% / 7.1%).
+
+**Recent data (2023).**
+- Training and testing on 2023 labels, ESA 2017 with change masks: AUC 0.944, look-alike FPR 31%.
+- A 2017 model applied to 2023 keeps its ranking (AUC 0.91–0.93) but its cut-off drifts. Train on the target year.
+
+**E4: cost of region-box weak labels (2017, Sentinel-2 + Open Buildings, tested on ESA labels in held-out folds).**
+
+| Training | AUC | Balanced acc. | FPR | Flags as slum |
+|---|---:|---:|---:|---:|
+| Region-box labels (v4 rule) | 0.610 | 0.566 | 0.558 | 59% of cells |
+| ESA labels, same box cells | 0.939 | 0.868 | 0.141 | 30% |
+| ESA labels, all cells | 0.947 | 0.857 | 0.091 | 24% |
+
+- Of the cells the boxes call "slum", only 28% are ESA slum; of those they call "non-slum", 23% are. The box labels carry almost no information, and 866 cells carry both labels.
+- **Labels explain almost the whole gap** (AUC 0.61 → 0.94 on identical cells). Wider coverage mainly lowers false positives (14% → 9%).
+
+**E5: maps and change, 2017 → 2023.**
+- Each built-up cell is predicted by a model that never saw its block.
+- Predicted slum covers 35.4 km² (2017) and 35.1 km² (2023) of cells, against ESA's 23.9 km² of exact area. The difference is entirely mixed or adjacent cells; no predicted slum cell lies far from an ESA slum.
+- A plain 0.5 cut flags 76% of stable slum as changed, which is noise. Counting only confident switches (< 0.1 one year, ≥ 0.9 the other): **0.7 km² new slum, 0.9 km² no longer slum**, 17.7 km² uncertain.
+- A blind 100-cell spot-check sheet with Google Maps links is in `results/tables/spotcheck_2017_2023.csv`; the answer key is in `spotcheck_2017_2023_key.csv`.
 
 ---
 
@@ -270,14 +330,14 @@ AUC, balanced accuracy, precision / recall / F1, IoU, **dense-formal false-posit
 
 ## 6. Experiments
 
-| ID | Experiment | Answers | Output |
+| ID | Experiment | Answers | Status (2026-11-22) |
 |---|---|---|---|
-| **E0** | Label audit: ESA vs region boxes, overlaps, polygon sizes | RQ3, C3 | Done (§3.1–3.2); to be turned into a figure |
-| **E1** | GRAM done properly: zoom-18 tiles, test-time adaptation, all 12 domain indices, scored on ESA-labelled test blocks | RQ1, C2 | GRAM table + failure maps |
-| **E2** | Main benchmark: 2017, spatial CV, models from §5.5 | RQ2, C1 | Main results table |
-| **E3** | Ablation: Sentinel-2 only → + Open Buildings → + context (→ + LocateAnything, optional) | RQ2 | Ablation table |
-| **E4** | Weak-label cost: same model trained on (a) old region-box labels vs (b) ESA labels, both tested on ESA | RQ3, C3 | One comparison table |
-| **E5** | Change map: apply the best E2 model to 2018–2023; spot-check known events such as Korail fires and evictions | RQ4, C4 | Annual maps + change statistics |
+| **E0** | Label audit: ESA vs region boxes, overlaps, polygon sizes | RQ3, C3 | Done (§3.1–3.2), figure `fig_label_audit` |
+| **E1** | GRAM done properly: zoom-18 tiles, test-time adaptation, all 12 domain indices, scored on ESA-labelled test blocks | RQ1, C2 | **Open.** Scorer ready (`scripts/score_gram.py`); needs Esri licence decision (D3) and a Colab GPU |
+| **E2** | Main benchmark: 2017, spatial CV, models from §5.5 | RQ2, C1 | Done with gradient boosting (§3.5); small CNN optional |
+| **E3** | Ablation: Sentinel-2 only → + Open Buildings → + context | RQ2 | Done (§3.5), figure `fig_ablation`; LocateAnything dropped (D2) |
+| **E4** | Weak-label cost: same model trained on (a) old region-box labels vs (b) ESA labels, both tested on ESA | RQ3, C3 | Done (§3.5), figure `fig_weak_labels` |
+| **E5** | Maps and change: best model per year, confident change only, spot-check | RQ4, C4 | Done for 2017/2023 (§3.5), figure `fig_maps`; spot-check sheet to fill; 2018–2022 optional (one export per year) |
 
 ### 6.1 Decision gates
 
@@ -295,17 +355,14 @@ AUC, balanced accuracy, precision / recall / F1, IoU, **dense-formal false-posit
 
 ## 7. Work plan
 
-The week numbers are relative; adjust them to the team's timetable. Owners are suggestions.
+Done: data and labels, E0, E2–E5, figures, data card (2026-11-22). Remaining, owners are suggestions:
 
-| Week | Tasks | Suggested owner |
+| Task | Needs | Suggested owner |
 |---|---|---|
-| 1 | Put the ESA shapefile on Drive. Get the city-corporation / mapped-area boundary. Pull Open Buildings Temporal for 2017–2023. Decide the open items in §11. | Angkon (lead), Fardeen |
-| 1–2 | Build the 100 m grid and ESA-derived labels (§5.2). Build spatial blocks (§5.3). Add audit checks (class counts per fold, no leakage). Turn E0 into a figure. | Angkon, Zayan |
-| 2–3 | **E1:** fetch zoom-18 tiles for test blocks (if licence allows), run GRAM adaptation and the domain sweep, score on ESA. | Angkon (ran the original GRAM baseline), Nafiz |
-| 2–3 | **E2/E3:** export per-cell features, train the boosting baseline and CNN, run spatial CV. | Zayan, Masum |
-| 4 | **E4:** weak-label vs ESA-label comparison. Define dense-formal strata. Write up the hard-negative analysis. | Fardeen |
-| 5 | **E5:** 2018–2023 maps and change statistics. Spot-check 20–40 cells per year against Esri / Google imagery by eye. | Masum, all |
-| 6 | Paper writing, figures, release scripts and derived labels. | All |
+| **E1:** zoom-18 tiles over test blocks, GRAM test-time adaptation + domain sweep, then `scripts/score_gram.py` | Esri licence decision (D3), Colab GPU | Angkon (ran the original GRAM baseline), Nafiz |
+| Fill the blind spot-check sheet (100 cells, ~1 h by eye) and score it against the key | One person | any |
+| Optional: 50 m cell sensitivity (D4); 2018–2022 maps; small CNN | GEE exports; GPU for the CNN | Zayan, Masum |
+| Paper writing in the conference template; release scripts and derived labels | Full-paper deadline | All |
 
 ---
 
@@ -313,15 +370,21 @@ The week numbers are relative; adjust them to the team's timetable. Owners are s
 
 ### 8.1 New
 
+Built 2026-11-22. All read `config/benchmark.yaml`; run with `~/.venvs/ee/bin/python` in this order:
+
 | File | Purpose |
 |---|---|
-| `gee/export_esa_labels.py` (or local) | Rasterize ESA polygons to the 10 m grid and 100 m cells; write label, ignore mask, and slum fraction |
-| `gee/export_open_buildings.py` | Export Open Buildings Temporal (presence, height, count) per year |
-| `gee/export_s2_annual.py` | Year-matched Sentinel-2 L2A dry-season composites, 2017–2023 (2017 coverage verified) |
-| `src/data/grid.py` | 100 m grid, per-cell features, spatial blocks and folds |
-| `src/models/cell_classifier.py` | Boosting baseline + small CNN |
-| `scripts/score_against_esa.py` | Generalization of the 2026-10-05 GRAM scoring script |
-| `config/benchmark.yaml` | Thresholds, buffer, block size, folds, years |
+| `scripts/build_mapped_area.py` | Reconstruct ESA's mapped area from geoBoundaries ADM4 units |
+| `src/data/grid.py`, `scripts/build_benchmark_grid.py` | 100 m grid, ESA slum share / near-slum / mapped masks, labels, spatial folds |
+| `gee/export_cell_features.py` | Sentinel-2, Open Buildings, Dynamic World, VIIRS, WorldPop aggregated to the grid per year |
+| `scripts/build_cell_table.py` | Per-year cell tables with labels, change masks, folds |
+| `scripts/run_cell_benchmark.py`, `src/eval/cell_metrics.py` | E2/E3 with strata |
+| `scripts/run_weak_label_cost.py` | E4 |
+| `scripts/analyze_strata.py` | Recall by slum type/size; sensitivity |
+| `scripts/make_slum_maps.py` | E5 maps, change, spot-check sheet |
+| `scripts/score_gram.py` | Score any GRAM output (pixel + cell) against ESA |
+| `scripts/make_benchmark_figures.py` | Paper figures |
+| `gee/upload_esa_polygons.py` | ESA polygons to an EE asset (unused: the account lacks asset write access) |
 
 ### 8.2 Reuse
 
@@ -383,11 +446,11 @@ Decide after E1/E2. A strong E1 + E2 fits a remote-sensing journal or an AI-for-
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | Adopt this plan over `PROJECT_RECOVERY_PLAN.md`? | Yes |
-| D2 | LocateAnything: optional ablation or drop? | Optional ablation only if the cached features can be reused cheaply; otherwise drop |
-| D3 | Esri zoom-18 tiles for the GRAM rerun: licence OK for research use? | Check Esri terms before downloading; keep the tile count minimal |
-| D4 | Cell size: 100 m, or also 50 m? | 100 m primary; 50 m as a sensitivity check |
-| D5 | Slum-fraction threshold for a "slum" cell | 50%; report sensitivity at 30% and 70% |
-| D6 | Spot-check effort for 2018–2023 | 20–40 cells per year, one person, viewing imagery only |
+| D2 | LocateAnything: optional ablation or drop? | **Decided: dropped.** It is not in the submitted abstract |
+| D3 | Esri zoom-18 tiles for the GRAM rerun: licence OK for research use? | **Open, for the team.** Check Esri terms; keep the tile count minimal; never redistribute |
+| D4 | Cell size: 100 m, or also 50 m? | 100 m primary; 50 m sensitivity not yet run |
+| D5 | Slum-fraction threshold for a "slum" cell | **Done:** 0.5, with sensitivity at 0.3 / 0.7 reported (§3.5) |
+| D6 | Spot-check effort | **Done:** one blind 100-cell sheet (20 per change class), one person, current imagery |
 
 ---
 
@@ -427,7 +490,7 @@ Decide after E1/E2. A strong E1 + E2 fits a remote-sensing journal or an AI-for-
 | `SUPERVISOR_BRIEF.md` | Superseded. Its "GRAM fails" claim must be updated with §3.3, including the Old Dhaka correction. |
 | `NEXT_SESSION.md` | Superseded. |
 | `BanglaSlumNetV4.md`, `AGENT_HANDOFF.md` | v4 reference only. |
-| `DATA_CARD.md` | Outdated (lists 5 regions). Rewrite for the ESA-based benchmark. |
+| `DATA_CARD.md` | Rewritten for the ESA-based benchmark (2026-11-22). |
 | `RESULTS.md` | Empty. No trustworthy results exist yet. |
 | `gram-zero-shot:gram_baseline/FINDINGS.md` | Partially wrong: the Old Dhaka claim and the "~1.2 m/px" resolution. See §3.3. |
 
