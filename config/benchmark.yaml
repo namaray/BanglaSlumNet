@@ -67,6 +67,11 @@ benchmark:
   tables_dir: results/tables
   runs_dir: results/runs/benchmark
 
+# ─── E4: cost of region-box weak labels (§6) ──────────────────────────────────
+weak_label_cost:
+  year: 2017
+  regions_yaml: config/regions_dhaka.yaml   # the v4 region boxes (informal -> slum, formal_dense -> non-slum)
+
 # ─── Features exported from Earth Engine per 100 m cell (§5.5) ────────────────
 features:
   s2_bands: [B2, B3, B4, B8, B11, B12]
