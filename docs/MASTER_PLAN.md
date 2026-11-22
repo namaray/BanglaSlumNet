@@ -155,7 +155,7 @@ The October 2026 version of this table (AUC 0.42 / 0.32 / 0.74 / 0.54, ESA slum 
 - **Correction to `FINDINGS.md`:** it claimed GRAM blanket-flags *formal* Old Dhaka as slum. Those tiles contain riverside settlements (29% ESA slum inside the mapped area), and GRAM ranks them above chance (AUC 0.62). Do not use Old Dhaka as the GRAM failure example.
 - **Why this is preliminary:**
   1. Only GRAM's first phase was run. Its main idea is a second, test-time adaptation phase that adapts to a new city using its own pseudo-labels (`main_moe_pl_v3.py`); that was never run.
-  2. The tiles were zoom-16 Esri imagery at **2.19 m/px**. `FINDINGS.md` wrongly says ~1.2 m/px. GRAM was trained on finer imagery.
+  2. ~~Wrong resolution~~ **Resolved 2026-11-22:** GRAM's dataset README says the authors used Esri World Imagery Wayback at **zoom 16**, the same zoom as this run, so resolution is not a confound. (The authors quote "~1.2 m/px"; a 256 px zoom-16 tile over Dhaka is 2.19 m/px. Worth checking their tile size, but the zoom matches.) The rerun can use Wayback imagery dated close to 2017.
   3. Only 4 of 12 domain indices were tried, chosen by activation on a Korail test tile.
   4. Only 27 tiles at 3 sites.
   5. The imagery is recent, but the labels are from 2017.
