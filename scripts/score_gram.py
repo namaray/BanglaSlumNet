@@ -54,7 +54,8 @@ def load_gram_pixels(gram_dir, zoom, grid_crs):
         if not m:
             continue
         loc, x, y = m.group(1), int(m.group(2)), int(m.group(3))
-        p = np.load(f).astype("float32")
+        p = np.load(f)
+        p = p.astype("float32") / 255.0 if p.dtype == np.uint8 else p.astype("float32")  # Kaggle maps are uint8
         mx, my = tile_pixel_centres(x, y, zoom, *p.shape)
         gx, gy = to_grid.transform(mx.ravel(), my.ravel())
         parts.append(pd.DataFrame({"location": loc, "tile": f"{x}_{y}", "x": gx, "y": gy, "prob": p.ravel()}))
@@ -92,7 +93,8 @@ def run(gram_dir, zoom, tag, config, features):
     row = np.floor((grid.top - px.y) / grid.cell_m).astype(int)
     px["row"], px["col"] = row, col
     cell = px.groupby(["row", "col"]).agg(gram_prob=("prob", "mean"), n_px=("prob", "size")).reset_index()
-    pixel_m = 2 * WEB_MERC_HALF / 2 ** zoom / 256 * np.cos(np.radians(23.75))
+    side = int(round(np.sqrt(px.groupby("tile").size().iloc[0])))  # pixels per tile side (256, or 64 for sweeps)
+    pixel_m = 2 * WEB_MERC_HALF / 2 ** zoom / side * np.cos(np.radians(23.75))
     full = (grid.cell_m / pixel_m) ** 2
     cell = cell[cell.n_px >= 0.9 * full]
     cells = pd.read_csv(os.path.join(cfg["paths"]["derived_dir"], f"cells_{year}.csv"))
