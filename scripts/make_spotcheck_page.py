@@ -106,8 +106,11 @@ a {{ color:var(--accent); }}
 <div class="help">Judge only the <b>yellow square (100 m &times; 100 m)</b>. <b>Yes</b> if more than half of it is slum:
 small tightly packed (often tin) roofs, narrow lanes, no road grid. <b>No</b> if it is mostly formal buildings
 (even dense ones like Old Dhaka), or water, parks, factories, construction. <b>Unsure</b> if about half and half or unclear.
-Answers save in this browser automatically. Imagery: Esri World Imagery Wayback {release_title}.</div>
-<p><button onclick="download()">Download CSV</button></p></header>
+Answers save in this browser only (not in this file): use the same browser, no private window, and
+click <b>Download CSV</b> when done (and once midway as a backup). Send that CSV back.
+Imagery: Esri World Imagery Wayback {release_title}.</div>
+<p><label>Your name: <input id="rater" placeholder="e.g. Nafiz" style="font:inherit;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)"></label>
+<button onclick="download()">Download CSV</button></p></header>
 <main>{cards}</main>
 <script>
 const KEY = "banglaslumnet_spotcheck_{release}";
@@ -124,13 +127,19 @@ for (const i of ids) {{
   t.addEventListener("input", () => {{ state[i] = {{...(state[i]||{{}}), n: t.value}}; save(); }});
 }}
 count();
+const rater = document.getElementById("rater");
+rater.value = state.rater || "";
+rater.addEventListener("input", () => {{ state.rater = rater.value; save(); }});
 const rows = {rows};
 function download() {{
+  const name = (rater.value || "").trim();
+  if (!name) {{ alert("Please type your name first."); rater.focus(); return; }}
   const esc = s => '"' + String(s || "").replace(/"/g, '""') + '"';
-  const lines = ["id,lat,lon,is_slum_now,notes"].concat(rows.map(r => [r.id, r.lat, r.lon, (state[r.id]||{{}}).v || "", esc((state[r.id]||{{}}).n)].join(",")));
+  const lines = ["id,lat,lon,is_slum_now,notes,rater"].concat(rows.map(r =>
+    [r.id, r.lat, r.lon, (state[r.id]||{{}}).v || "", esc((state[r.id]||{{}}).n), esc(name)].join(",")));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([lines.join("\\n")], {{type: "text/csv"}}));
-  a.download = "spotcheck_filled.csv"; a.click();
+  a.download = "spotcheck_" + name.toLowerCase().replace(/[^a-z0-9]+/g, "_") + ".csv"; a.click();
 }}
 </script></body></html>"""
 
@@ -150,9 +159,14 @@ def run(release, sheet, out_dir):
     os.makedirs(tile_dir, exist_ok=True)
     os.makedirs(os.path.join(out_dir, "images"), exist_ok=True)
     rows = list(pts.itertuples())
+    cache_path = os.path.join(tile_dir, "capture_dates.json")  # metadata calls are slow (~11 s each)
+    cache = json.load(open(cache_path)) if os.path.exists(cache_path) else {}
     with ThreadPoolExecutor(4) as pool:
         list(pool.map(lambda r: make_image(r, release, tile_dir, os.path.join(out_dir, "images", f"id_{r.id:03d}.jpg")), rows))
-        dates = list(pool.map(lambda r: capture_date(cfg["metadataLayerUrl"], r.lon, r.lat), rows))
+        dates = list(pool.map(lambda r: cache.get(f"{r.lat},{r.lon}") or capture_date(cfg["metadataLayerUrl"], r.lon, r.lat), rows))
+    cache.update({f"{r.lat},{r.lon}": d for r, d in zip(rows, dates) if d != "unknown"})
+    with open(cache_path, "w") as f:
+        json.dump(cache, f)
     def b64(r):  # images are embedded so the page is one self-contained file
         with open(os.path.join(out_dir, "images", f"id_{r.id:03d}.jpg"), "rb") as f:
             return base64.b64encode(f.read()).decode()
