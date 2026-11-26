@@ -67,6 +67,19 @@ def to_input(xb, device):
     return (xb.to(device).float() / 255.0 - mean) / std
 
 
+class SegOnly(torch.nn.Module):
+    """Return only GRAM's segmentation logits. The patched model keeps its auxiliary MI loss on
+    the CPU, which DataParallel cannot gather; GRAM's adaptation (main_moe_pl_v3.py) only uses
+    the segmentation output, so nothing is lost."""
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, x, domain):
+        return self.model(x, domain)[0]
+
+
 def build_model(bundle, device):
     sys.path.insert(0, bundle)
     from model import mit_b5_MOE
@@ -88,7 +101,7 @@ def predict(model, x, domain, device, batch=32):
     for i in range(0, len(x), batch):
         xb = to_input(x[i:i + batch], device)
         d = torch.full((len(xb),), domain, dtype=torch.long, device=device)
-        seg, _, _ = model(xb, d)
+        seg = model(xb, d)
         out.append((F.softmax(seg.float(), dim=1)[:, 1] * 255).round().to(torch.uint8).cpu())
     return torch.cat(out)
 
@@ -125,10 +138,12 @@ def main():
     ap.add_argument("--out", default="")
     ap.add_argument("--pred_batch", type=int, default=8, help="tiles per GPU per prediction step")
     ap.add_argument("--micro_batch", type=int, default=4, help="tiles per GPU per adaptation micro-step")
+    ap.add_argument("--gpus", type=int, default=0, help="GPUs to use (0 = all available)")
     args = ap.parse_args()
     t0 = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    n_gpu = max(torch.cuda.device_count(), 1)
+    n_gpu = min(torch.cuda.device_count(), args.gpus) if args.gpus else torch.cuda.device_count()
+    n_gpu = max(n_gpu, 1)
     bundle = find_bundle()
     out = args.out or ("/kaggle/working/gram_outputs" if os.path.isdir("/kaggle/working")
                        else os.path.join(bundle, "gram_outputs"))
@@ -136,7 +151,9 @@ def main():
     paths, x = load_tiles(os.path.join(bundle, "tiles"), args.max_tiles)
     print(f"[data] {len(paths)} tiles, device {device} ({torch.cuda.device_count()} GPU)")
     model = build_model(bundle, device)
-    net = torch.nn.DataParallel(model) if torch.cuda.device_count() > 1 else model
+    net = SegOnly(model)
+    if n_gpu > 1:
+        net = torch.nn.DataParallel(net, device_ids=list(range(n_gpu)))
     pred_batch = args.pred_batch * n_gpu
     micro = min(args.micro_batch * n_gpu, BATCH)
     accum = max(BATCH // micro, 1)
@@ -176,7 +193,7 @@ def main():
             for j in range(0, len(batch_idx), micro):
                 xb = to_input(x[batch_idx[j:j + micro]], device)
                 d = torch.full((len(xb),), pivot, dtype=torch.long, device=device)
-                seg, _, _ = net(xb, d)
+                seg = net(xb, d)
                 loss = focal_loss(seg, seg.argmax(1).detach()) * len(xb) / len(batch_idx)
                 loss.backward()
                 step_loss += loss.item()
