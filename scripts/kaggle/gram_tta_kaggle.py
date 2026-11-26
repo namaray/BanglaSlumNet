@@ -19,6 +19,10 @@ Output: /kaggle/working/gram_outputs.zip -> download it from the notebook's Outp
 
 Kaggle notebook cell:
     !python /kaggle/input/<your-dataset-name>/gram_tta_kaggle.py
+
+Memory: one GRAM forward needs ~256 MB per tile in the decoder, so predictions run 8 tiles per
+GPU, and adaptation splits GRAM's batch of 16 into micro-batches with gradient accumulation
+(same effective batch). If a 16 GB GPU still runs out, lower --pred_batch / --micro_batch.
 """
 
 import glob
@@ -27,6 +31,8 @@ import os
 import shutil
 import sys
 import time
+
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # before torch import
 
 import numpy as np
 import torch
@@ -117,9 +123,12 @@ def main():
     ap.add_argument("--max_tiles", type=int, default=0, help="smoke test only: use the first N tiles")
     ap.add_argument("--epochs", type=int, default=EPOCHS)
     ap.add_argument("--out", default="")
+    ap.add_argument("--pred_batch", type=int, default=8, help="tiles per GPU per prediction step")
+    ap.add_argument("--micro_batch", type=int, default=4, help="tiles per GPU per adaptation micro-step")
     args = ap.parse_args()
     t0 = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    n_gpu = max(torch.cuda.device_count(), 1)
     bundle = find_bundle()
     out = args.out or ("/kaggle/working/gram_outputs" if os.path.isdir("/kaggle/working")
                        else os.path.join(bundle, "gram_outputs"))
@@ -127,11 +136,16 @@ def main():
     paths, x = load_tiles(os.path.join(bundle, "tiles"), args.max_tiles)
     print(f"[data] {len(paths)} tiles, device {device} ({torch.cuda.device_count()} GPU)")
     model = build_model(bundle, device)
+    net = torch.nn.DataParallel(model) if torch.cuda.device_count() > 1 else model
+    pred_batch = args.pred_batch * n_gpu
+    micro = min(args.micro_batch * n_gpu, BATCH)
+    accum = max(BATCH // micro, 1)
+    print(f"[memory] prediction batch {pred_batch}; adaptation {accum} x {micro} = effective batch {accum * micro}")
 
     # 1. Zero-shot sweep over all domain indices
     probs = {}
     for d in range(DOMAINS):
-        probs[d] = predict(model, x, d, device)
+        probs[d] = predict(net, x, d, device, batch=pred_batch)
         save_maps(paths, probs[d], os.path.join(out, f"sweep_domain{d:02d}"), size=64)
         print(f"[sweep] domain {d:2d}: mean prob {probs[d].float().mean() / 255:.3f}, "
               f"slum share {(probs[d] >= 128).float().mean():.3f}")
@@ -148,7 +162,6 @@ def main():
     tile_score = torch.stack([mask_iou(masks[pivot], masks[o]) for o in range(DOMAINS) if o != pivot]).mean(0)
     keep = torch.argsort(tile_score, descending=True)[: int(len(paths) * TOP_RATIO)]
     del probs, masks
-    net = torch.nn.DataParallel(model) if torch.cuda.device_count() > 1 else model
     opt = torch.optim.SGD(model.parameters(), lr=LR, momentum=0.99)
     losses = []
     g = torch.Generator().manual_seed(0)
@@ -156,24 +169,29 @@ def main():
         net.train()
         order = keep[torch.randperm(len(keep), generator=g)]
         ep = []
-        for i in range(0, len(order), BATCH):
-            xb = to_input(x[order[i:i + BATCH]], device)
-            d = torch.full((len(xb),), pivot, dtype=torch.long, device=device)
-            seg, _, _ = net(xb, d)
-            loss = focal_loss(seg, seg.argmax(1).detach())
+        for i in range(0, len(order), BATCH):  # one optimizer step per GRAM batch of 16
+            batch_idx = order[i:i + BATCH]
             opt.zero_grad()
-            loss.backward()
+            step_loss = 0.0
+            for j in range(0, len(batch_idx), micro):
+                xb = to_input(x[batch_idx[j:j + micro]], device)
+                d = torch.full((len(xb),), pivot, dtype=torch.long, device=device)
+                seg, _, _ = net(xb, d)
+                loss = focal_loss(seg, seg.argmax(1).detach()) * len(xb) / len(batch_idx)
+                loss.backward()
+                step_loss += loss.item()
+                del seg, loss, xb
             opt.step()
-            ep.append(loss.item())
+            ep.append(step_loss)
         losses.append(float(np.mean(ep)))
         print(f"[tta] epoch {epoch + 1}/{args.epochs} loss {losses[-1]:.4f}")
 
     # 4. Adapted predictions
-    adapted = predict(model, x, pivot, device)
+    adapted = predict(net, x, pivot, device, batch=pred_batch)
     save_maps(paths, adapted, os.path.join(out, "tta"))
     log = {"tiles": len(paths), "device": str(device), "gpus": torch.cuda.device_count(),
            "domain_agreement": agree, "pivot_domain": pivot, "tta_tiles": len(keep),
-           "epochs": args.epochs, "batch": BATCH, "lr": LR, "top_ratio": TOP_RATIO, "epoch_loss": losses,
+           "epochs": args.epochs, "batch": BATCH, "micro_batch": micro, "accum_steps": accum, "lr": LR, "top_ratio": TOP_RATIO, "epoch_loss": losses,
            "adapted_slum_share": float((adapted >= 128).float().mean()), "minutes": (time.time() - t0) / 60}
     with open(os.path.join(out, "log.json"), "w") as f:
         json.dump(log, f, indent=2)
